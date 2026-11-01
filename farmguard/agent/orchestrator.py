@@ -23,7 +23,7 @@ from typing import Any
 from farmguard.agent.clip_builder import build_event_images
 from farmguard.agent.memory import Memory, hour_bucket
 from farmguard.agent.notifier import Notifier
-from farmguard.agent.policy import Policy, PolicyContext
+from farmguard.agent.policy import LLMPolicy, Policy, PolicyContext
 from farmguard.agent.retreat import RetreatChecker, RetreatResult
 from farmguard.agent.validators import ESCALATE
 from farmguard.agent.vlm_check import VLMChecker
@@ -79,6 +79,8 @@ class AgentWorker:
         self._last_played: dict[str, float] = {}
         self.first_sound_cache: dict[str, str] | None = None  # set by build_system (shared with fast path)
         self._jsonl = cfg.path("logging.events_jsonl") if cfg.get("logging.events_jsonl") else None
+        if isinstance(policy, LLMPolicy) and not policy.decision_log and cfg.get("agent.policy.decision_log"):
+            policy.decision_log = cfg.path("agent.policy.decision_log")
 
     def start(self) -> AgentWorker:
         self._thread.start()
@@ -155,7 +157,8 @@ class AgentWorker:
                                 behaviour=behaviour, count=count,
                                 stats=self.memory.sound_stats(ev.species, bucket),
                                 last_played_at=dict(self._last_played), now=now,
-                                sound_cooldown_s=self.cfg.get("agent.policy.sound_cooldown_s", 20))
+                                sound_cooldown_s=self.cfg.get("agent.policy.sound_cooldown_s", 20),
+                                event_id=ev.event_id)
             decision: PolicyDecision = self.policy.decide(ctx)
             if decision.action == ESCALATE:
                 escalated = True
@@ -200,7 +203,7 @@ class AgentWorker:
                             allowed=info.allowed_sounds, default_sound=info.default_sound,
                             tried_this_event=[], attempt_no=0, max_attempts=max_attempts,
                             hour_bucket=bucket, stats=self.memory.sound_stats(ev.species, bucket),
-                            sound_cooldown_s=0)
+                            sound_cooldown_s=0, event_id=ev.event_id)
         try:
             rec = self.policy.decide(ctx).action
             if rec in info.allowed_sounds:

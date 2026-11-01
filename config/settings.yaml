@@ -71,6 +71,7 @@ agent:
     type: "llm"                 # llm | fixed | random | rule_chain | bandit
     max_attempts: 3             # after this many failed deterrents, escalate to the farmer
     sound_cooldown_s: 20
+    decision_log: "data/policy_decisions.jsonl"   # full prompt + response per LLM decision (paper examples, invalid-action rate)
   include_location_in_prompt: false   # keep false: location hints made Claude answer from geography (~10% acc)
   adaptive_first_sound: true    # after each event the agent picks the next first alarm (cached; no LLM call in the alarm path)
 
@@ -78,7 +79,7 @@ notifier:
   language: "hi"                # hi | mr | en
   channels: ["console"]         # console | telegram
   voice_note: true              # gTTS voice note when telegram is enabled
-  nightly_summary_hour: 7
+  nightly_summary_hour: 7       # summary covers the 24 h before this hour, up to now; schedule `python -m farmguard.agent.farmer summary`
 
 memory:
   db_path: "data/farmguard.sqlite"

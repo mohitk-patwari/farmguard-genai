@@ -19,6 +19,10 @@ class ValidationContext:
     sound_cooldown_s: float = 20.0
 
 
+def on_cooldown(sound: str, ctx: ValidationContext) -> bool:
+    return ctx.now - ctx.last_played_at.get(sound, -1e9) < ctx.sound_cooldown_s
+
+
 def validate(action: str, ctx: ValidationContext) -> tuple[str, list[str]]:
     """Returns (final_action, warnings). Never raises."""
     warnings: list[str] = []
@@ -26,15 +30,14 @@ def validate(action: str, ctx: ValidationContext) -> tuple[str, list[str]]:
         return ESCALATE, [f"max_attempts={ctx.max_attempts} reached"]
     if action == ESCALATE:
         return ESCALATE, warnings
-    candidates = [s for s in ctx.allowed if s not in ctx.tried_this_event and
-                  ctx.now - ctx.last_played_at.get(s, -1e9) >= ctx.sound_cooldown_s]
+    candidates = [s for s in ctx.allowed if s not in ctx.tried_this_event and not on_cooldown(s, ctx)]
     if action not in ctx.allowed:
         warnings.append(f"'{action}' not in allowed list")
         action = candidates[0] if candidates else ESCALATE
     elif action in ctx.tried_this_event:
         warnings.append(f"'{action}' already failed in this event")
         action = candidates[0] if candidates else ESCALATE
-    elif ctx.now - ctx.last_played_at.get(action, -1e9) < ctx.sound_cooldown_s:
+    elif on_cooldown(action, ctx):
         warnings.append(f"'{action}' on cooldown")
         action = candidates[0] if candidates else ESCALATE
     return action, warnings

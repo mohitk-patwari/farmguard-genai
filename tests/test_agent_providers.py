@@ -168,8 +168,9 @@ class Flaky(LLMClient):
 
 
 def test_budget_stops_retries_and_repair():
-    client = Flaky([TimeoutError(), '{"a": 1}'], timeout_s=100, max_total_s=150, backoff_base_s=60.0)
-    assert client.generate_json("p", {}).data is None and client.n == 1  # 60 s + 100 s > 150 s
+    # backoff is at least 100 s after jitter, so 100 s + the 100 s timeout never fits in 150 s
+    client = Flaky([TimeoutError(), '{"a": 1}'], timeout_s=100, max_total_s=150, backoff_base_s=200.0)
+    assert client.generate_json("p", {}).data is None and client.n == 1
     client = Flaky(["not json", '{"a": 1}'], timeout_s=100, max_total_s=99)
     res = client.generate_json("p", {})
     assert res.error == "invalid_json" and client.n == 1  # no budget left for the repair call
