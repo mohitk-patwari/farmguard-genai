@@ -86,7 +86,10 @@ class AgentWorker:
     def stop(self, wait: bool = True, timeout: float | None = None) -> None:
         self.queue.put(None)
         if wait:
-            self._thread.join(timeout)
+            # short joins: on Windows a single long join() ignores Ctrl+C until it times out
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while self._thread.is_alive() and (deadline is None or time.monotonic() < deadline):
+                self._thread.join(0.2)
 
     def _loop(self) -> None:
         while True:

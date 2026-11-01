@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
 from farmguard.config import load_config
@@ -131,7 +132,14 @@ def main(argv=None) -> None:
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    args.fn(args)
+    try:
+        args.fn(args)
+    except KeyboardInterrupt:
+        # os._exit: the agent's VLM pool threads are not daemons, and a normal exit would join them
+        # mid-LLM call (uninterruptible on Windows). Memory and logs are already written per event.
+        logging.getLogger(__name__).info("Interrupted")
+        sys.stdout.flush()
+        os._exit(130)
 
 
 if __name__ == "__main__":

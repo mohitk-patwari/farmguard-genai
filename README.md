@@ -18,6 +18,18 @@ streamlit run app/streamlit_app.py
 python -m farmguard.cli simulate            # E4 baselines in the simulator
 ```
 
+## Windows notes
+Tested on Windows 11 with Windows PowerShell 5.1 and Python 3.12. Use Python 3.10-3.12.
+- Setup: `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` (add a folder path to set up a
+  worktree, e.g. `..\fg-vision`). Each worktree needs its own `.venv`.
+- Skip activation and call `.\.venv\Scripts\python -m farmguard.cli ...` directly. PowerShell 5.1 has
+  no `&&`, so chain commands with `;`.
+- Alarm audio uses pygame. With no working audio device, `auto` falls back to `none` (log only).
+- FarmGuard writes UTF-8. If Hindi/Marathi looks garbled when piped, run
+  `[Console]::OutputEncoding = [Text.Encoding]::UTF8` first. If it shows boxes in the console,
+  the console font lacks Devanagari (Windows Terminal handles it).
+- Ctrl+C exits straight away with code 130, abandoning any event the agent is still handling.
+
 ## With real models
 ```bash
 ollama pull qwen2.5vl:7b                     # free local VLM

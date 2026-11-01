@@ -51,7 +51,8 @@ class AlarmPlayer:
         if wanted != "auto":
             return wanted
         try:
-            import pygame  # noqa: F401
+            import pygame
+            pygame.mixer.init()  # importable is not enough: this raises when there is no audio device
             return "pygame"
         except Exception:
             pass
@@ -84,9 +85,13 @@ class AlarmPlayer:
     def _loop(self) -> None:
         pg = None
         if self.backend == "pygame":
-            import pygame
-            pygame.mixer.init()
-            pg = pygame
+            try:  # backend="pygame" set explicitly skips _pick_backend's check
+                import pygame
+                pygame.mixer.init()
+                pg = pygame
+            except Exception:
+                log.exception("pygame audio unavailable, alarms will be log-only")
+                self.backend = "none"
         while True:
             rec = self._q.get()
             if rec is None:
