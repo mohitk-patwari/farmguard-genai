@@ -329,7 +329,11 @@ def fetch_commons_clips() -> None:
                 continue
             safe = re.sub(r"[^\w.-]+", "_", title)
             path = out / f"{cls}__{safe}"
-            if not _download((info["url"].split("?")[0], path)):
+            for wait in (60, 120, 240, 0):  # the media host rate-limits too
+                if _download((info["url"].split("?")[0], path)) or not wait:
+                    break
+                time.sleep(wait)
+            if not path.exists():
                 log.warning("download failed: %s", title)
                 continue
             lines.append(f"| `{path.name}` | {clean(meta.get('Artist', {}).get('value'))} | {licence} | "
