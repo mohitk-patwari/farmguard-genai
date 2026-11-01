@@ -58,6 +58,11 @@ agent:
     frames_after: 2
     crop_padding: 0.25          # AlexKapy: 15-25% padding around the box
     max_side: 768
+  fewshot:                      # labelled examples sent before the event images (E2 ablates this)
+    enabled: false              # off until E2 shows it helps on our model; BLIP's 7.61% -> 91.0% was another model and task
+    dir: "data/fewshot"         # <dir>/<species key, none or other_animal>/*.jpg
+    per_species: 3              # 3-5; about 21 images per call at 3 (5 species + none + other_animal), so expect slower calls
+    max_side: 384
   retreat:
     observe_seconds: 12         # how long after a deterrent we watch
     gone_frames: 15             # consecutive frames with no animal in zone = gone (tracker evidence)

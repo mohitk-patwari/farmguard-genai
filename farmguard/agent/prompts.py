@@ -67,6 +67,15 @@ def vlm_prompt(species_keys: list[str], n_images: int, layout: str,
     return "\n".join(lines)
 
 
+def fewshot_note(labels: list[str]) -> str:
+    """Few-shot (Alencar et al., JBCS 2026: BLIP empty filter 7.61% -> 91.0%). Only the category
+    label is given about each reference image: no file name, place or farm (rule R1)."""
+    numbered = ", ".join(f"{i}={label}" for i, label in enumerate(labels, 1))
+    return (f"Before those images come {len(labels)} labelled reference images that are NOT from this "
+            f"event, in this order: {numbered}. Use them only to learn what each category looks like; "
+            "answer only about the event images that follow them.")
+
+
 def retreat_schema() -> dict[str, Any]:
     return {
         "type": "object",
