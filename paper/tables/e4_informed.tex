@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\caption{Simulated deterrence, ``informed'' effectiveness, 5 independent runs of 60 nights. All parameters are assumptions, not field data.}
+\label{tab:e4_informed}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Policy & Success & 95\% CI & Run SD & First sound & Late & Time (s) & LLM calls/event \\
+\midrule
+fixed & 0.241 & 0.213-0.270 & 0.020 & 0.127 & 0.228 & 715 & 0.00 \\
+random & 0.583 & 0.550-0.615 & 0.034 & 0.265 & 0.582 & 401 & 0.00 \\
+rule chain & 0.528 & 0.495-0.561 & 0.039 & 0.244 & 0.506 & 451 & 0.00 \\
+bandit & 0.594 & 0.561-0.626 & 0.023 & 0.260 & 0.593 & 390 & 0.00 \\
+\bottomrule
+\end{tabular}}
+\\[2pt]{\footnotesize Wilson CI treats events as independent and is too narrow; Run SD is the spread between runs. Escalation rate is 1 - success by construction.}
+\end{table}

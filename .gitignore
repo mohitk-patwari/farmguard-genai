@@ -20,6 +20,8 @@ data/raw/
 data/yolo/
 weights/
 results/
+data/frames/
+data/labels/*.conflicts.csv
 config/zones.json
 .pytest_cache/
 .ruff_cache/

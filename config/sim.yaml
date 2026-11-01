@@ -26,6 +26,9 @@ effectiveness:
 habituation:
   strength: 0.35             # p_eff = p * exp(-strength * exposures(species, sound))
   recovery_hours: 72         # exposures decay with this time constant
+  cross: 0.0                 # share of exposure to OTHER sounds that also counts (0 = none). Loud
+                             # sounds with no real threat may habituate together; cross = 0 rewards
+                             # rotation over `fixed` by construction, so the grid below varies it.
 
 modifiers:
   eating_penalty: 0.75       # eating animals are harder to move (x p)
@@ -35,6 +38,18 @@ modifiers:
 
 timing:
   observe_seconds: 12        # retreat-check window per attempt
-  leave_time_mean_s: 15      # lognormal time to leave after a successful sound
+  leave_time_mean_s: 8       # mean lognormal time to leave after a successful sound, capped at
+                             # observe_seconds. Was 15, which is longer than the window and clipped
+                             # most draws to 12 s. Same for every policy. Set before any E4 result.
+  leave_time_sigma: 0.4
   farmer_arrival_s: 900      # if escalated, animal stays until the farmer arrives
   max_attempts: 3
+
+# Sensitivity grid (docs/PAPER_PLAN.md, E4): full factorial, run with `python -m farmguard.eval e4-grid`.
+# The plan names the habituation and effectiveness levels; the eating levels and cross_habituation
+# are our choice, fixed before any result was seen.
+sensitivity:
+  habituation_strength: [0.1, 0.35, 0.6]
+  effectiveness: [random, informed]
+  eating_penalty: [0.5, 0.75, 1.0]
+  cross_habituation: [0.0, 0.5]

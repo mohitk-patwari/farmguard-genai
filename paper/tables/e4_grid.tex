@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\caption{Sensitivity over 36 simulated scenarios (30 runs each). Win = higher success with Holm-adjusted run-level p < 0.05. Assumptions, not field data.}
+\label{tab:e4_grid}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrrrr}
+\toprule
+Comparison & Mean diff & Min diff & Max diff & Wins & Losses \\
+\midrule
+random vs fixed & +0.191 & -0.017 & +0.450 & 33 & 2 \\
+rule chain vs fixed & +0.150 & +0.016 & +0.324 & 36 & 0 \\
+bandit vs fixed & +0.199 & -0.010 & +0.451 & 33 & 0 \\
+random vs bandit & -0.009 & -0.040 & +0.008 & 0 & 13 \\
+rule chain vs bandit & -0.049 & -0.163 & +0.027 & 4 & 24 \\
+\bottomrule
+\end{tabular}}
+\end{table}
