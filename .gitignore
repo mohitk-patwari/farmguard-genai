@@ -16,6 +16,8 @@ data/clips/*
 data/synth/*
 !data/synth/README.md
 results/
+data/frames/
+data/labels/*.conflicts.csv
 config/zones.json
 .pytest_cache/
 .ruff_cache/
