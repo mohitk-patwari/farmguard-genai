@@ -192,6 +192,7 @@ def test_is_transient_classification():
 
 
 def test_every_provider_gets_its_own_model_id():
+    pytest.importorskip("anthropic")  # CI installs core + dev only
     cfg = load_config(overrides={"agent.provider": "anthropic"})
     assert build_client(cfg, "vlm").model == cfg.get("agent.models.anthropic.vlm")
     assert build_client(load_config(overrides={"agent.provider": "ollama"}), "llm").model == cfg.get("agent.llm_model")
