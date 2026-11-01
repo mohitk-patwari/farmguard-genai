@@ -106,7 +106,7 @@ if start:
         with shared.lock:
             frame, events, results = shared.frame, list(shared.events), list(shared.results)
         if frame is not None:
-            frame_slot.image(frame, use_container_width=True)
+            frame_slot.image(frame, width="stretch")
         status_slot.info(f"Intrusion events: {len(events)} | agent results: {len(results)}")
         with side_slot.container():
             for ev in events:

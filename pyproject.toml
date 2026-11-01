@@ -19,7 +19,7 @@ dependencies = [
 vision = ["ultralytics>=8.3", "torch", "torchvision"]
 audio = ["pygame>=2.5"]
 genai = ["google-genai", "anthropic", "gTTS"]
-app = ["streamlit>=1.35", "matplotlib", "pandas"]
+app = ["streamlit>=1.50", "matplotlib", "pandas"]
 dev = ["pytest>=8", "ruff"]
 all = ["farmguard[vision,audio,genai,app,dev]"]
 

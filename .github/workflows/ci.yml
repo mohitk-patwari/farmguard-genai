@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Core + dev only: tests use MockDetector / MockClient, no GPU, weights or API keys.
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - run: python -m farmguard.cli make-sounds
+      - run: python -m farmguard.cli make-demo
+      - run: >-
+          python -m farmguard.cli run --source data/demo/demo.mp4
+          --mock-annotations data/demo/demo_annotations.json
+          --zones data/demo/demo_zones.json --provider mock --fast

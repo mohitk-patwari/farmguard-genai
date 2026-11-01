@@ -2,11 +2,16 @@
 # One-time setup. Run from the repo root:  bash scripts/setup.sh
 set -euo pipefail
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e ".[dev]"
-pip install -r requirements.txt || echo "Some optional packages failed; core still works."
+# Git Bash on Windows: venv layout is Scripts/, and python3 is often the Store shim, not the install.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) PY=python;  VENV_BIN=Scripts ;;
+  *)                    PY=python3; VENV_BIN=bin ;;
+esac
+"$PY" -m venv .venv
+source ".venv/$VENV_BIN/activate"
+python -m pip install --upgrade pip  # "python -m": pip.exe cannot replace itself on Windows
+python -m pip install -e ".[dev]"
+python -m pip install -r requirements.txt || echo "Some optional packages failed; core still works."
 
 [ -f .env ] || cp .env.example .env
 python -m farmguard.cli make-sounds
