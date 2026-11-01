@@ -138,7 +138,8 @@ class AgentWorker:
 
         report: VLMReport | None = None
         try:
-            report = vlm_future.result(timeout=self.cfg.get("agent.timeout_s", 120) + 30)
+            # the task's own worst case: 30 s waiting for frames + max_total_s for the VLM call
+            report = vlm_future.result(timeout=self.cfg.get("agent.max_total_s", 180) + 35)
         except Exception as exc:
             log.warning("VLM check failed: %s", exc)
         behaviour = report.behaviour if report else "unclear"

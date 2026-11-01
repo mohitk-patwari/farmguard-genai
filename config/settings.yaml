@@ -44,8 +44,15 @@ agent:
   provider: "ollama"            # ollama | gemini | anthropic | openai_compat | mock
   vlm_model: "qwen2.5vl:7b"
   llm_model: "qwen2.5vl:7b"     # can be a text-only model; the policy step sends no images
-  temperature: 0.2
-  timeout_s: 120
+  models:                       # per-provider ids; win over vlm_model/llm_model (those stay the Ollama tags)
+    gemini: {vlm: "gemini-3.8-flash", llm: "gemini-3.8-flash"}
+    anthropic: {vlm: "claude-opus-5-5", llm: "claude-opus-5-5"}
+    # openai_compat: {vlm: "...", llm: "..."}   # depends on the server
+  temperature: 0.2              # null = don't send. Never sent to Anthropic (400 on API version 2026-10-21)
+  timeout_s: 120                # per attempt
+  max_retries: 2                # transient errors only (timeouts, connection, 408/409/425/429/5xx)
+  backoff_base_s: 1.0           # 1 s, 2 s, ... with jitter; a Retry-After header wins if longer
+  max_total_s: 180              # ceiling per generate_json: no retry/repair unless a further timeout_s fits
   clip:
     frames_before: 2            # neighbouring frames sent with the trigger frame
     frames_after: 2

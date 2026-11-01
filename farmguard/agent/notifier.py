@@ -108,7 +108,7 @@ class Notifier:
                               data={"chat_id": creds[1], "text": text}, timeout=15)
             return r.ok
         except requests.RequestException as exc:
-            log.warning("Telegram send failed: %s", exc)
+            log.warning("Telegram send failed: %s", type(exc).__name__)  # str(exc) has the bot token URL
             return False
 
     def _telegram_voice(self, text: str) -> bool:
@@ -126,5 +126,5 @@ class Notifier:
                                   data={"chat_id": creds[1]}, files={"audio": audio}, timeout=30)
             return r.ok
         except Exception as exc:
-            log.warning("Voice note failed: %s", exc)
+            log.warning("Voice note failed: %s", type(exc).__name__)  # str(exc) can hold the bot token URL
             return False

@@ -38,6 +38,7 @@ def vlm_schema(species_keys: list[str]) -> dict[str, Any]:
             "note": {"type": "string", "description": "one short sentence"},
         },
         "required": ["observation", "species", "count", "behaviour", "confidence", "note"],
+        "additionalProperties": False,
     }
 
 
@@ -76,6 +77,7 @@ def retreat_schema() -> dict[str, Any]:
             "confidence": {"type": "string", "enum": CONFIDENCE},
         },
         "required": ["observation", "status", "animals_visible", "confidence"],
+        "additionalProperties": False,
     }
 
 
@@ -107,6 +109,7 @@ def policy_schema(allowed_actions: list[str]) -> dict[str, Any]:
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
         "required": ["action", "reason", "confidence"],
+        "additionalProperties": False,
     }
 
 
@@ -134,6 +137,7 @@ def alert_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {"message": {"type": "string"}, "voice_text": {"type": "string"}},
         "required": ["message", "voice_text"],
+        "additionalProperties": False,
     }
 
 

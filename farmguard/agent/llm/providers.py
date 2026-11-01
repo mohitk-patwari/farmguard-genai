@@ -1,14 +1,20 @@
 """Concrete providers. Only `requests` is required; SDKs are imported lazily.
 
-NOTE for Claude Code: model ids and SDK details change. Verify against current docs:
-  - Ollama:   POST /api/chat, `format` accepts a JSON schema (Ollama >= 0.5), `images` = base64 list
-  - Gemini:   google-genai SDK, response_mime_type="application/json" (+ response_schema)
-  - Anthropic: messages API with a forced tool call (tool_choice={"type": "tool", ...})
-  - OpenAI-compatible (vLLM, Groq, OpenAI...): /chat/completions with response_format json_schema
+Checked against the docs and installed SDKs on 2026-11-01 (tests/test_agent_providers.py pins the
+wire format with a local fake server; not yet run against the live services):
+  - Ollama:   POST /api/chat, `format` = JSON schema, `images` = base64 list on the message
+  - Gemini:   google-genai 2.34, response_mime_type + response_json_schema; HttpOptions.timeout in ms
+  - Anthropic: anthropic 2.3 sends API version 2026-10-21, where `temperature` is a 400 on every model
+              (the SDK dropped the argument) and forced tool_choice is a 400 on Opus 5.5 / Sonnet 5.5.
+              So: output_config.format, no sampling params. Numeric schema limits are not supported
+              there, so they are stripped and enforced in code (vlm_check, policy).
+  - OpenAI-compatible (vLLM, Groq, OpenAI...): response_format json_schema with strict=true, which
+              needs additionalProperties=false and every field required (prompts.py schemas comply)
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from typing import Any
@@ -16,6 +22,17 @@ from typing import Any
 import requests
 
 from farmguard.agent.llm.base import LLMClient, b64
+
+log = logging.getLogger(__name__)
+
+
+def _post_json(url: str, body: dict[str, Any], timeout: float,
+               headers: dict[str, str] | None = None) -> dict[str, Any]:
+    r = requests.post(url, json=body, headers=headers, timeout=timeout)
+    if not r.ok:  # raise_for_status drops the body, which holds the reason ("model not found")
+        log.warning("POST %s -> HTTP %d: %s", url, r.status_code, r.text[:300])
+    r.raise_for_status()
+    return r.json()
 
 
 class OllamaClient(LLMClient):
@@ -33,58 +50,69 @@ class OllamaClient(LLMClient):
         if images:
             user["images"] = [b64(i) for i in images]
         msgs.append(user)
-        r = requests.post(f"{self.host}/api/chat", timeout=self.timeout_s, json={
-            "model": self.model, "messages": msgs, "stream": False, "format": schema,
-            "options": {"temperature": self.temperature}})
-        r.raise_for_status()
-        return r.json()["message"]["content"]
+        body: dict[str, Any] = {"model": self.model, "messages": msgs, "stream": False, "format": schema}
+        if self.temperature is not None:
+            body["options"] = {"temperature": self.temperature}
+        return _post_json(f"{self.host}/api/chat", body, self.timeout_s)["message"]["content"]
 
 
 class GeminiClient(LLMClient):
     name = "gemini"
 
-    def __init__(self, model: str = "gemini-2.5-flash", **kw):
+    def __init__(self, model: str = "gemini-3.8-flash", **kw):
         super().__init__(model, **kw)
         from google import genai  # pip install google-genai
-        self._genai = genai
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        from google.genai import types
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"),
+                                   http_options=types.HttpOptions(timeout=int(self.timeout_s * 1000)))
 
     def _call(self, prompt, schema, images, system):
         from google.genai import types
         parts: list[Any] = [types.Part.from_bytes(data=i, mime_type="image/jpeg") for i in images]
-        parts.append(prompt + "\n\nJSON schema to follow:\n" + json.dumps(schema))
+        parts.append(prompt)
         cfg = types.GenerateContentConfig(temperature=self.temperature,
                                           response_mime_type="application/json",
+                                          response_json_schema=schema,
                                           system_instruction=system)
         resp = self.client.models.generate_content(model=self.model, contents=parts, config=cfg)
         return resp.text or ""
 
 
+def _strip_numeric_limits(schema: Any) -> Any:
+    if isinstance(schema, dict):
+        return {k: _strip_numeric_limits(v) for k, v in schema.items() if k not in ("minimum", "maximum")}
+    if isinstance(schema, list):
+        return [_strip_numeric_limits(v) for v in schema]
+    return schema
+
+
 class AnthropicClient(LLMClient):
+    """No `temperature` (see module docstring): runs at the API default whatever settings.yaml says."""
     name = "anthropic"
 
-    def __init__(self, model: str = "claude-sonnet-4-5", **kw):
+    def __init__(self, model: str = "claude-opus-5-5", **kw):
         super().__init__(model, **kw)
         import anthropic  # pip install anthropic
-        self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"),
+                                          timeout=self.timeout_s, max_retries=0)
 
     def _call(self, prompt, schema, images, system):
         content: list[dict[str, Any]] = [
             {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64(i)}}
             for i in images]
         content.append({"type": "text", "text": prompt})
-        tool = {"name": "answer", "description": "Return the answer in this exact structure.",
-                "input_schema": schema}
-        kwargs: dict[str, Any] = {"model": self.model, "max_tokens": 800, "temperature": self.temperature,
-                                  "messages": [{"role": "user", "content": content}],
-                                  "tools": [tool], "tool_choice": {"type": "tool", "name": "answer"}}
+        kwargs: dict[str, Any] = {
+            "model": self.model, "max_tokens": 16000,  # thinking shares this limit; don't lowball it
+            "messages": [{"role": "user", "content": content}],
+            "output_config": {"format": {"type": "json_schema", "schema": _strip_numeric_limits(schema)}}}
         if system:
             kwargs["system"] = system
         resp = self.client.messages.create(**kwargs)
-        for block in resp.content:
-            if getattr(block, "type", "") == "tool_use":
-                return json.dumps(block.input)
-        return "".join(getattr(b, "text", "") for b in resp.content)
+        # ponytail: no server-side `fallbacks`: a silent model swap would corrupt E2's per-model
+        # numbers. A refusal goes to our non-GenAI fallback like any other failed call.
+        if resp.stop_reason == "refusal":
+            raise RuntimeError(f"model refused: {resp.stop_details}")
+        return "".join(b.text for b in resp.content if b.type == "text")
 
 
 class OpenAICompatClient(LLMClient):
@@ -103,13 +131,14 @@ class OpenAICompatClient(LLMClient):
         content.append({"type": "text", "text": prompt})
         msgs = ([{"role": "system", "content": system}] if system else []) + [
             {"role": "user", "content": content}]
-        r = requests.post(f"{self.base_url}/chat/completions", timeout=self.timeout_s,
-                          headers={"Authorization": f"Bearer {self.api_key}"}, json={
-                              "model": self.model, "messages": msgs, "temperature": self.temperature,
-                              "response_format": {"type": "json_schema", "json_schema": {
-                                  "name": "answer", "schema": schema}}})
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        body: dict[str, Any] = {"model": self.model, "messages": msgs,
+                                "response_format": {"type": "json_schema", "json_schema": {
+                                    "name": "answer", "strict": True, "schema": schema}}}
+        if self.temperature is not None:
+            body["temperature"] = self.temperature
+        data = _post_json(f"{self.base_url}/chat/completions", body, self.timeout_s,
+                          {"Authorization": f"Bearer {self.api_key}"})
+        return data["choices"][0]["message"]["content"]
 
 
 class MockClient(LLMClient):
@@ -152,10 +181,14 @@ def default_mock_responder(prompt: str, schema: dict, n_images: int) -> dict:
 
 
 def build_client(cfg, role: str = "vlm") -> LLMClient:
-    """role = "vlm" (images) or "llm" (text). Both use agent.provider."""
+    """role = "vlm" (images) or "llm" (text). Both use agent.provider. agent.models.<provider> wins
+    over vlm_model / llm_model, so --provider gemini does not send Gemini an Ollama model tag."""
     provider = cfg.get("agent.provider", "ollama")
-    model = cfg.get(f"agent.{role}_model") or cfg.get("agent.vlm_model")
-    kw = {"temperature": cfg.get("agent.temperature", 0.2), "timeout_s": cfg.get("agent.timeout_s", 120)}
+    model = (cfg.get(f"agent.models.{provider}.{role}") or cfg.get(f"agent.{role}_model")
+             or cfg.get("agent.vlm_model"))
+    kw = {"temperature": cfg.get("agent.temperature", 0.2), "timeout_s": cfg.get("agent.timeout_s", 120),
+          "max_retries": cfg.get("agent.max_retries", 2), "backoff_base_s": cfg.get("agent.backoff_base_s", 1.0),
+          "max_total_s": cfg.get("agent.max_total_s", 180)}
     if provider == "ollama":
         return OllamaClient(model, **kw)
     if provider == "gemini":
