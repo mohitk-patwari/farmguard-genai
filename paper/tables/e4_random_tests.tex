@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\caption{Paired tests, simulated ``random'' setting. Run-level sign-flip test, Holm-adjusted. Smallest possible p with 5 runs: 0.062.}
+\label{tab:e4_random_tests}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrrrrr}
+\toprule
+Comparison & Success diff & p (run) & p (Holm) & Time diff (s) & b/c & McNemar p \\
+\midrule
+random vs fixed & +0.396 & 0.062 & 0.312 & -363 & 352/4 & <0.001 \\
+rule chain vs fixed & +0.288 & 0.062 & 0.312 & -263 & 254/1 & <0.001 \\
+bandit vs fixed & +0.401 & 0.062 & 0.312 & -368 & 352/2 & <0.001 \\
+random vs bandit & -0.005 & 0.875 & 0.875 & +5 & 74/76 & 0.935 \\
+rule chain vs bandit & -0.113 & 0.062 & 0.312 & +105 & 36/133 & <0.001 \\
+\bottomrule
+\end{tabular}}
+\\[2pt]{\footnotesize McNemar is descriptive only: events within a run share habituation state.}
+\end{table}

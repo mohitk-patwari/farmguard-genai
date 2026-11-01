@@ -44,7 +44,8 @@ def _headline(exp: str, out: dict[str, Any]) -> str:
         return "; ".join(f"{k}: left/stayed acc {v['left_vs_stayed']['accuracy']:.3f}"
                          for k, v in out["conditions"].items())
     if exp == "e4":
-        return " ".join(f"{p}: {s['success_rate']:.3f} succ, {s['mean_time_in_field_s']:.0f}s"
+        return f"SIMULATED, {out['sim_config']['effectiveness']['mode']}: " + " ".join(
+                        f"{p}: {s['success_rate']:.3f} succ, {s['mean_time_in_field_s']:.0f}s"
                         + (f", fallback {s['llm_fallback_rate']:.1%}" if p == "llm" else "") + ";"
                         for p, s in out["summary"].items())
     if exp == "e4-grid":

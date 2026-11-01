@@ -102,7 +102,7 @@ def fig_features(figs: Path) -> None:
     ax.barh(names, vals, height=0.6, color=POLICY_STYLE["fixed"][0])
     for y, v in enumerate(vals):
         ax.text(v + 0.4, y, str(v), va="center", color=INK, fontsize=7)
-    ax.set_xlabel("Repositories (of 79 on-topic with code)")
+    ax.set_xlabel("Repositories (of 79)")
     ax.grid(axis="y", visible=False)
     ax.tick_params(axis="y", length=0)
     _save(fig, figs / "feature_gap.pdf")
@@ -148,7 +148,8 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
         by: dict[str, list[dict]] = defaultdict(list)
         for row in data["learning_curve"]:
             by[row["policy"]].append(row)
-        for p, rows in by.items():
+        for p in (q for q in POLICY_STYLE if q in by):
+            rows = by[p]
             color, marker = POLICY_STYLE[p]
             xs = [r["night_start"] for r in rows]
             ys = [r["success_rate"] for r in rows]
@@ -162,7 +163,7 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
             ax.set_ylabel("Success rate")
         ax.set_ylim(0, 1)
 
-        # time in field: mean over runs, 95% t-free interval from run means (+- 1.96 SE)
+        # time in field: same per-event mean as the table, interval from the spread of run means
         per_run: dict[tuple[str, str], list[float]] = defaultdict(list)
         for o in _read_csv(results / f"e4_{mode}_outcomes.csv"):
             per_run[(o["policy"], o["run"])].append(float(o["time_in_field_s"]))
@@ -170,7 +171,7 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
         names = list(summ)[::-1]
         for y, p in enumerate(names):
             means = [statistics.fmean(v) for (q, _), v in per_run.items() if q == p]
-            m = statistics.fmean(means)
+            m = summ[p]["mean_time_in_field_s"]
             half = 1.96 * statistics.stdev(means) / len(means) ** 0.5 if len(means) > 1 else 0.0
             color, marker = POLICY_STYLE[p]
             ax2.plot([m - half, m + half], [y, y], color=color, solid_capstyle="round")
