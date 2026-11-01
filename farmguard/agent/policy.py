@@ -12,15 +12,17 @@ All policies see the same PolicyContext and go through validators.validate().
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from farmguard.agent.llm.base import LLMClient
 from farmguard.agent.prompts import SYSTEM_POLICY, policy_prompt, policy_schema
-from farmguard.agent.validators import ESCALATE, ValidationContext, validate
+from farmguard.agent.validators import ESCALATE, ValidationContext, on_cooldown, validate
 from farmguard.events import PolicyDecision
 
 log = logging.getLogger(__name__)
@@ -42,6 +44,7 @@ class PolicyContext:
     last_played_at: dict[str, float] = field(default_factory=dict)
     now: float = 0.0
     sound_cooldown_s: float = 20.0
+    event_id: str = ""
 
     def validation(self) -> ValidationContext:
         return ValidationContext(self.allowed, self.tried_this_event, self.attempt_no,
@@ -122,38 +125,93 @@ class BanditPolicy(Policy):
 
 
 class LLMPolicy(Policy):
+    """One worker thread decides at a time, so propose() can leave its trace on self for decide()."""
     name = "llm"
 
-    def __init__(self, client: LLMClient, fallback: Policy | None = None):
+    def __init__(self, client: LLMClient, fallback: Policy | None = None,
+                 decision_log: str | Path | None = None):
         self.client = client
         self.fallback = fallback or BanditPolicy()
+        self.decision_log = Path(decision_log) if decision_log else None  # JSONL, one line per decision
+        self._trace: dict[str, Any] = {}
 
     def context_json(self, ctx: PolicyContext) -> dict[str, Any]:
+        """Same keys every time, and every allowed sound always listed in the same order, so a
+        sound with no trials reads as "no evidence" instead of being absent."""
+        v = ctx.validation()
         return {
-            "species": ctx.species_label, "animals": ctx.count,
-            "behaviour_seen_by_camera": ctx.behaviour,
+            "species": ctx.species_label, "animals": ctx.count, "behaviour": ctx.behaviour,
             "time_of_day": ctx.hour_bucket,
-            "attempt_number": ctx.attempt_no + 1, "max_attempts": ctx.max_attempts,
-            "sounds_already_tried_in_this_event_and_failed": ctx.tried_this_event,
+            "attempt": ctx.attempt_no + 1, "max_attempts": ctx.max_attempts,
+            "tried_this_event": ctx.tried_this_event,
+            "on_cooldown": [s for s in ctx.allowed if on_cooldown(s, v)],
             "allowed_actions": ctx.allowed + [ESCALATE],
-            "past_results_for_this_species_and_time": {
-                s: {"trials": v.get("trials", 0), "success_rate": v.get("success_rate"),
-                    "recent": v.get("recent", [])}
-                for s, v in ctx.stats.items() if s in ctx.allowed},
+            "history": {s: {"trials": ctx.stats.get(s, {}).get("trials", 0),
+                            "success_rate": ctx.stats.get(s, {}).get("success_rate"),
+                            "recent": ctx.stats.get(s, {}).get("recent", [])}
+                        for s in ctx.allowed},
         }
 
     def propose(self, ctx):
         allowed = ctx.allowed + [ESCALATE]
-        res = self.client.generate_json(policy_prompt(self.context_json(ctx)),
-                                        policy_schema(allowed), None, SYSTEM_POLICY)
-        if not res.data or res.data.get("action") not in allowed:
+        prompt = policy_prompt(self.context_json(ctx))
+        res = self.client.generate_json(prompt, policy_schema(allowed), None, SYSTEM_POLICY)
+        proposed = (res.data or {}).get("action")
+        in_enum = proposed in allowed
+        self._trace = {"provider": self.client.name, "model": res.model, "system": SYSTEM_POLICY, "prompt": prompt,
+                       "raw_response": res.raw, "llm_error": res.error, "llm_latency_s": res.latency_s,
+                       "proposed": proposed, "llm_failed": res.data is None,
+                       "out_of_enum": res.data is not None and not in_enum}
+        if not in_enum:
             a, r, c = self.fallback.propose(ctx)
             return a, f"LLM failed ({res.error or 'bad action'}); fallback {self.fallback.name}: {r}", c
         try:
-            conf = float(res.data.get("confidence", 0.5))
+            conf = min(1.0, max(0.0, float(res.data.get("confidence", 0.5))))
         except (TypeError, ValueError):
             conf = 0.5
-        return res.data["action"], str(res.data.get("reason", ""))[:400], conf
+        return proposed, str(res.data.get("reason", ""))[:400], conf
+
+    def decide(self, ctx):
+        if ctx.attempt_no >= ctx.max_attempts:  # the validator would force this: don't spend a call
+            return PolicyDecision(ESCALATE, f"max_attempts={ctx.max_attempts} reached", 1.0, self.name)
+        d = super().decide(ctx)
+        t = self._trace
+        used_fallback = t["llm_failed"] or t["out_of_enum"]
+        if used_fallback:  # so results never credit the LLM with a decision the bandit made
+            d.source = f"llm_fallback_{self.fallback.name}"
+        self._log({"ts": time.time(), "event_id": ctx.event_id, "attempt": ctx.attempt_no + 1, **t,
+                   "validator_changed": bool(d.warnings) and not used_fallback,
+                   "final_action": d.action, "source": d.source, "reason": d.reason, "warnings": d.warnings})
+        return d
+
+    def _log(self, record: dict[str, Any]) -> None:
+        if not self.decision_log:
+            return
+        try:  # losing a log line must never cost the decision
+            self.decision_log.parent.mkdir(parents=True, exist_ok=True)
+            with self.decision_log.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        except OSError as exc:
+            log.warning("Could not write decision log: %s", exc)
+
+
+def decision_log_summary(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Per model, from the JSONL. invalid_action_rate is over the answers the LLM actually gave:
+    outside the enum, or changed by validate() (already tried, on cooldown). Failed calls are counted
+    apart. Compare across providers with care: those that enforce the schema can't go out of enum."""
+    out: dict[str, dict[str, Any]] = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        s = out.setdefault(r["model"], {"decisions": 0, "llm_failed": 0, "out_of_enum": 0, "validator_changed": 0})
+        s["decisions"] += 1
+        for key in ("llm_failed", "out_of_enum", "validator_changed"):
+            s[key] += bool(r[key])
+    for s in out.values():
+        answers = s["decisions"] - s["llm_failed"]
+        s["invalid_action_rate"] = (s["out_of_enum"] + s["validator_changed"]) / answers if answers else None
+    return out
 
 
 def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = None) -> Policy:

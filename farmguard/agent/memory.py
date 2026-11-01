@@ -88,8 +88,22 @@ class Memory:
             s["success_rate"] = round(s["successes"] / s["trials"], 2) if s["trials"] else None
         return stats
 
-    def recent_events(self, since_ts: float) -> list[dict[str, Any]]:
+    def events_with_sounds(self, since: float | None = None, until: float | None = None,
+                           species: list[str] | None = None) -> list[dict[str, Any]]:
+        """Newest first, each with its sounds in play order. `until` is exclusive."""
+        q = ("SELECT e.*, (SELECT GROUP_CONCAT(sound, ', ') FROM"
+             " (SELECT sound FROM attempts a WHERE a.event_id=e.event_id ORDER BY a.attempt_no)) AS sounds"
+             " FROM events e WHERE 1=1")
+        args: list[Any] = []
+        if since is not None:
+            q += " AND e.wall_time>=?"
+            args.append(since)
+        if until is not None:
+            q += " AND e.wall_time<?"
+            args.append(until)
+        if species:
+            q += f" AND e.species IN ({','.join('?' * len(species))})"
+            args += species
         with self._lock:
-            rows = self.conn.execute("SELECT * FROM events WHERE wall_time>=? ORDER BY wall_time",
-                                     (since_ts,)).fetchall()
+            rows = self.conn.execute(q + " ORDER BY e.wall_time DESC", args).fetchall()
         return [dict(r) for r in rows]

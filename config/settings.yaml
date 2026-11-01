@@ -49,13 +49,25 @@ agent:
   provider: "ollama"            # ollama | gemini | anthropic | openai_compat | mock
   vlm_model: "qwen2.5vl:7b"
   llm_model: "qwen2.5vl:7b"     # can be a text-only model; the policy step sends no images
-  temperature: 0.2
-  timeout_s: 120
+  models:                       # per-provider ids; win over vlm_model/llm_model (those stay the Ollama tags)
+    gemini: {vlm: "gemini-3.8-flash", llm: "gemini-3.8-flash"}
+    anthropic: {vlm: "claude-opus-5-5", llm: "claude-opus-5-5"}
+    # openai_compat: {vlm: "...", llm: "..."}   # depends on the server
+  temperature: 0.2              # null = don't send. Never sent to Anthropic (400 on API version 2026-10-21)
+  timeout_s: 120                # per attempt
+  max_retries: 2                # transient errors only (timeouts, connection, 408/409/425/429/5xx)
+  backoff_base_s: 1.0           # 1 s, 2 s, ... with jitter; a Retry-After header wins if longer
+  max_total_s: 180              # ceiling per generate_json: no retry/repair unless a further timeout_s fits
   clip:
     frames_before: 2            # neighbouring frames sent with the trigger frame
     frames_after: 2
     crop_padding: 0.25          # AlexKapy: 15-25% padding around the box
     max_side: 768
+  fewshot:                      # labelled examples sent before the event images (E2 ablates this)
+    enabled: false              # off until E2 shows it helps on our model; BLIP's 7.61% -> 91.0% was another model and task
+    dir: "data/fewshot"         # <dir>/<species key, none or other_animal>/*.jpg
+    per_species: 3              # 3-5; about 21 images per call at 3 (5 species + none + other_animal), so expect slower calls
+    max_side: 384
   retreat:
     observe_seconds: 12         # how long after a deterrent we watch
     gone_frames: 15             # consecutive frames with no animal in zone = gone (tracker evidence)
@@ -64,6 +76,7 @@ agent:
     type: "llm"                 # llm | fixed | random | rule_chain | bandit
     max_attempts: 3             # after this many failed deterrents, escalate to the farmer
     sound_cooldown_s: 20
+    decision_log: "data/policy_decisions.jsonl"   # full prompt + response per LLM decision (paper examples, invalid-action rate)
   include_location_in_prompt: false   # keep false: location hints made Claude answer from geography (~10% acc)
   adaptive_first_sound: true    # after each event the agent picks the next first alarm (cached; no LLM call in the alarm path)
 
@@ -71,7 +84,7 @@ notifier:
   language: "hi"                # hi | mr | en
   channels: ["console"]         # console | telegram
   voice_note: true              # gTTS voice note when telegram is enabled
-  nightly_summary_hour: 7
+  nightly_summary_hour: 7       # summary covers the 24 h before this hour, up to now; schedule `python -m farmguard.agent.farmer summary`
 
 memory:
   db_path: "data/farmguard.sqlite"

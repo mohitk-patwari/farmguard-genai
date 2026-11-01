@@ -51,6 +51,12 @@ def template_message(summary: dict[str, Any], language: str) -> str:
     return msg
 
 
+def local_name(cfg: Config, species: str, language: str) -> str:
+    info = cfg.species.get(species)
+    names = {"hi": info.hindi, "mr": info.marathi} if info else {}
+    return names.get(language, species.replace("_", " "))
+
+
 class Notifier:
     def __init__(self, cfg: Config, client: LLMClient | None):
         self.cfg = cfg
@@ -62,8 +68,7 @@ class Notifier:
 
     def build_summary(self, species: str, wall_time: float, sounds: list[str], final_status: str,
                       attempts: int, count: int, behaviour: str) -> dict[str, Any]:
-        info = self.cfg.species.get(species)
-        local = {"hi": info.hindi, "mr": info.marathi}.get(self.language, species) if info else species
+        local = local_name(self.cfg, species, self.language)
         labels = [self.cfg.sounds.get(s, {}).get("label", s) for s in sounds]
         return {"animal": species.replace("_", " "), "animal_local": local, "count": count,
                 "time": time.strftime("%H:%M", time.localtime(wall_time)),
@@ -80,7 +85,9 @@ class Notifier:
         return msg, msg, "template"
 
     def send(self, summary: dict[str, Any]) -> dict[str, Any]:
-        message, voice_text, source = self.compose(summary)
+        return self.deliver(*self.compose(summary))
+
+    def deliver(self, message: str, voice_text: str, source: str) -> dict[str, Any]:
         out = {"message": message, "voice_text": voice_text, "source": source, "channels": []}
         if "console" in self.channels:
             print(f"\n[FARMER ALERT/{self.language}] {message}\n", flush=True)
@@ -108,7 +115,7 @@ class Notifier:
                               data={"chat_id": creds[1], "text": text}, timeout=15)
             return r.ok
         except requests.RequestException as exc:
-            log.warning("Telegram send failed: %s", exc)
+            log.warning("Telegram send failed: %s", type(exc).__name__)  # str(exc) has the bot token URL
             return False
 
     def _telegram_voice(self, text: str) -> bool:
@@ -126,5 +133,5 @@ class Notifier:
                                   data={"chat_id": creds[1]}, files={"audio": audio}, timeout=30)
             return r.ok
         except Exception as exc:
-            log.warning("Voice note failed: %s", exc)
+            log.warning("Voice note failed: %s", type(exc).__name__)  # str(exc) can hold the bot token URL
             return False
