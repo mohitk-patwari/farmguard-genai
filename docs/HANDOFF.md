@@ -1,7 +1,16 @@
 # HANDOFF (shared notes between the four Claude Code terminals)
 
 ## Environment
-(Terminal 1: record Python, CUDA, ultralytics, Ollama and model versions here.)
+Recorded 2026-11-02 on the lead laptop (Windows 11, 16 GB RAM, RTX 3050 6 GB, driver 581.86).
+- Python 3.12.5. torch 2.14.1+cu130, torchvision 0.29.1+cu130 (CUDA 13.0), in `farmguard` and `fg-vision`
+  venvs only. ultralytics 8.4.197, lap 0.5.13, clip 1.0, opencv-python 5.0.0.93, numpy 2.5.4,
+  streamlit 1.66.1, pygame 2.6.1, anthropic 2.3.0, google-genai 2.34.0.
+- Setup installs CPU torch. For the GPU, afterwards:
+  `pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130`
+- Ollama 0.40.13 (winget), models `qwen2.5vl:7b` (6.0 GB) and `qwen2.5vl:3b` (3.2 GB).
+- Weights: `weights/yolov8s-worldv2-farmguard.pt`, baked with `scripts/bake_world_vocab.py`. It worked from
+  an empty `weights/` folder, fetching the base weights and installing CLIP by itself.
+- Run heavy jobs one at a time on this laptop. Parallel jobs ran it out of RAM.
 
 ## Status log
 - Base code from the research phase: pytest green (14 tests), mock demo runs end to end, simulator
@@ -16,6 +25,31 @@
   decision log + invalid-action rate, farmer summary and Q&A. All tested with mock clients and a local
   fake HTTP server (real `requests` and real SDKs, fake responses). **No provider has been called live:**
   Ollama is not installed here and no paid API was called. Fusion rules are NOT tuned (no labels yet).
+- Integration, 2026-11-02 (branch `main`). Merged vision, agent, experiments; only HANDOFF.md conflicted.
+  `LatencyLog.save()` (vision) emptied the rows `e1_run` reads (experiments), so E1 reported 0 alarms: fixed
+  in `fast/timing.py`. Added `--mute` / `FARMGUARD_MUTE=1`, `lap`, and the bake step in setup.
+- Real-model smoke test, 2026-11-02, `--mute`, so alarm timings exclude audio. These are smoke numbers, NOT
+  E1 results or field data. YOLO-World finds no animal in `data/demo/demo.mp4` (cartoon blob): 0 events, agent
+  never ran; detect median 3.4 ms, p95 58 ms. The table is from one 10 s real clip,
+  `boar__Sus_scrofa-wild_boars-Bulgaria-2_VP8.webm`, whole frame as the field. Each run: 11 events.
+
+  | | 7b | 3b | 3b, num_ctx 8192 |
+  |---|---|---|---|
+  | Finished | no, stopped at my 570 s limit; 11/11 alerts sent | yes, 248 s, 11/11 alerts | no, stopped at 490 s by RAM floor; 8/11 alerts |
+  | Ollama placement | 43%/57% CPU/GPU | 100% GPU | 100% GPU |
+  | Peak VRAM (idle 312 MB) | 5175 MB | 4581 MB | 4833 MB |
+  | Free RAM, start -> lowest | 6789 -> 2181 MB | 6982 -> 4174 MB | 6974 -> 1505 MB |
+  | VLM event check | 0/23 ok | 0/22 ok | 18/18 ok, median 12.6 s |
+  | VLM retreat check (1 image), median | 7.8 s | 3.2 s | 3.2 s |
+  | Policy call, median | 5.3 s | 3.2 s | not split |
+  | Alert + first-sound calls, median | 7.7 s | 4.2 s | not split |
+  | Alarm read -> start, median / max | 30.8 / 47.8 ms | 34.6 / 42.4 ms | 35.1 / 58.0 ms |
+  | Alarm first-zone -> start, median / max | 267 / 835 ms | 271 / 824 ms | 267 / 827 ms |
+  | Decisions out of enum | 0/21 | 0/22 | 0/13 |
+
+  Detect on this clip (3b run, the only one that printed it): median 31.7 ms, p95 61.6 ms. No accuracy was
+  measured. Use 3b on this laptop; 7b needs more VRAM than it has. Neither is ready for a real run until the
+  items below are fixed.
 
 ## For Terminal 1 (integrator)
 - Add to requirements.txt: `lap>=0.5.12`. Without it ultralytics runs `pip install` from inside the
@@ -56,11 +90,28 @@ From Terminal 4:
   - The durian paper's test-set accuracy is 90/85/70%; the mAP values are from training.
 
 ## For Terminal 2 (vision)
+From the smoke test (Terminal 1):
+- All 11 events on the boar camera-trap clip were mislabelled: 9 `stray_cattle`, 2 `elephant`, none
+  `wild_boar`. One 10 s clip giving 11 events (one per new track) also means repeated alarms and agent runs.
 - `tracker_evidence` counts a detection with `track_id=None` as present anywhere in the frame, even outside
   the zone, because `FramePacket` only records in-zone track ids. If tracking often fails, retreat reads
   "still present" for an animal that left the field. Could FramePacket carry in-zone detections too?
 
 ## For Terminal 3 (agent)
+From the smoke test (Terminal 1), first calls ever made to a live provider:
+- **The VLM event check always fails on Ollama.** `request (4311 tokens) exceeds the available context size
+  (4096 tokens)`; 6 images need about 6500 tokens. `OllamaClient` sends no `num_ctx`. The agent falls back to
+  the detector label, so nothing crashes and the failure is easy to miss. It worked with 8192, set in a
+  temporary Modelfile, but free RAM then fell to 1.5 GB. Cause not investigated. Try fewer or smaller images
+  as well as a config knob for `num_ctx`.
+- LLM farmer alerts in Hindi are not usable yet on 7b or 3b: garbled, wrong sound names, repeated phrases, and
+  some Marathi mixed in. One 3b example: `हाथी आया था। यहाँ बीमारी की चिंता करते हैं।` ("An elephant came. Here
+  we worry about disease."). They pass as `llm`, so the template fallback never fires. Facts should be
+  checked before E6 and before any farmer sees them.
+- Text calls sometimes hit the 120 s timeout (1 on 7b, 2 on 3b at 8192). Cause not investigated.
+- The validator changed 9/21 (7b) and 10/22 (3b) decisions. Worth checking why.
+- One `llama-server` crash on the first 7b call, recovered on retry: `exit status 0xc0000409 ... CUDA error:
+  shared object initialization failed`. Not seen on 3b.
 - Alarms from the agent go through the same AlarmPlayer. Sounds are decoded once at startup now, so
   a WAV added while running is read from disk on its first play.
 - Sound ids are unchanged, but see the caveats in `sounds/SOURCES.md` before writing prompt text
