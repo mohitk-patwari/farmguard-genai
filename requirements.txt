@@ -1,0 +1,22 @@
+# Core (enough for tests, mock demo and the simulator)
+numpy>=1.24
+opencv-python>=4.8
+pyyaml>=6
+requests>=2.31
+pytest>=8
+
+# Vision (real detector): YOLOv8 / YOLO-World + ByteTrack
+ultralytics>=8.3
+
+# Audio playback (alarm). Without it the alarm falls back to aplay/afplay or log-only.
+pygame>=2.5
+
+# GenAI providers (install the ones you use; Ollama needs no Python package)
+google-genai
+anthropic
+gTTS
+
+# Demo app and plots
+streamlit>=1.35
+matplotlib
+pandas

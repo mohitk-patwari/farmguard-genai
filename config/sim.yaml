@@ -1,0 +1,40 @@
+# Simulator for experiment E4 (does the adaptive agent make animals leave faster?).
+# Recorded video cannot react to our sounds, so deterrent outcomes are simulated.
+# ALL numbers below are modelling assumptions, not measurements. The paper must say so and
+# report a sensitivity analysis (vary habituation, effectiveness mode, eating penalty).
+
+seed: 7
+nights: 60
+events_per_night: 3.0        # Poisson mean
+species_mix: {wild_boar: 0.35, nilgai: 0.25, monkey: 0.2, stray_cattle: 0.15, elephant: 0.05}
+
+effectiveness:
+  # mode "random": true flee probability per (species, sound) drawn from Beta(a, b) each run,
+  #   so no policy (and no LLM prior) knows the answer in advance -> tests learning.
+  # mode "informed": use the prior table below (literature-inspired guesses) -> tests whether an
+  #   LLM's world knowledge helps when it matches reality.
+  mode: random
+  beta_a: 2.0
+  beta_b: 3.0
+  prior:                     # used in "informed" mode; unspecified pairs default to 0.25
+    wild_boar:   {boar_alarm: 0.55, tiger_roar: 0.45, dog_bark: 0.4, gunshot: 0.5, siren: 0.3, human_shout: 0.35}
+    nilgai:      {dog_bark: 0.5, siren: 0.35, human_shout: 0.4, drum_beat: 0.3, gunshot: 0.45, tiger_roar: 0.4}
+    monkey:      {gunshot: 0.5, dog_bark: 0.45, leopard_growl: 0.55, human_shout: 0.3, drum_beat: 0.25, siren: 0.2}
+    elephant:    {bee_swarm: 0.6, tiger_roar: 0.3, siren: 0.25, drum_beat: 0.35}
+    stray_cattle: {human_shout: 0.5, dog_bark: 0.45, drum_beat: 0.3, siren: 0.35}
+
+habituation:
+  strength: 0.35             # p_eff = p * exp(-strength * exposures(species, sound))
+  recovery_hours: 72         # exposures decay with this time constant
+
+modifiers:
+  eating_penalty: 0.75       # eating animals are harder to move (x p)
+  night_penalty: 0.9         # x p at night
+  group_penalty_per_extra: 0.05
+  p_eating: 0.6              # chance the animal is eating when detected
+
+timing:
+  observe_seconds: 12        # retreat-check window per attempt
+  leave_time_mean_s: 15      # lognormal time to leave after a successful sound
+  farmer_arrival_s: 900      # if escalated, animal stays until the farmer arrives
+  max_attempts: 3

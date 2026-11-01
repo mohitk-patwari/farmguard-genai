@@ -1,0 +1,77 @@
+# FarmGuard master configuration.
+# Secrets (API keys, bot tokens) go in .env, never here.
+
+video:
+  source: "data/clips/sample.mp4"   # file path, webcam index (0), or rtsp:// URL
+  live: false            # true = drop stale frames (Queue maxsize=1); false = process every frame (evaluation)
+  target_fps: 10         # frames per second sent to the detector; 0 = every frame
+  resize_width: 960      # 0 = keep original size
+  buffer_seconds: 30     # how much recent video the agent can look back/forward into
+
+motion_gate:
+  enabled: true
+  min_changed_fraction: 0.002   # fraction of pixels that must change to wake the detector
+  warmup_frames: 15
+
+detector:
+  backend: "ultralytics"        # ultralytics | mock
+  model: "yolov8s-worldv2.pt"   # YOLO-World (open vocabulary) or a fine-tuned yolov8n.pt
+  open_vocabulary: true         # true = call set_classes() with the names below
+  classes: ["wild boar", "nilgai", "monkey", "elephant", "cow", "dog", "deer"]
+  ignore_classes: ["person", "car", "truck", "motorcycle"]
+  confidence: 0.25
+  imgsz: 640
+  device: ""                    # "" = auto, "cpu", "cuda:0", "mps"
+  tracker: "bytetrack.yaml"
+
+zones:
+  file: "config/zones.json"     # created with: farmguard draw-zone <video>
+  anchor: "bottom_center"       # point of the box tested against the polygon (animal's feet)
+
+trigger:
+  window: 7                     # vote window (frames)
+  min_hits: 4                   # animal must be in the zone in >= min_hits of the last `window` frames
+  track_cooldown_s: 60          # same track cannot re-trigger the first alarm within this time
+  min_box_area_frac: 0.0005     # ignore tiny far-away boxes
+
+alarm:
+  backend: "auto"               # auto | pygame | simpleaudio | aplay | afplay | none
+  sounds_dir: "sounds"
+  first_sound_policy: "species_default"   # species_default | random_allowed
+
+agent:
+  enabled: true
+  provider: "ollama"            # ollama | gemini | anthropic | openai_compat | mock
+  vlm_model: "qwen2.5vl:7b"
+  llm_model: "qwen2.5vl:7b"     # can be a text-only model; the policy step sends no images
+  temperature: 0.2
+  timeout_s: 120
+  clip:
+    frames_before: 2            # neighbouring frames sent with the trigger frame
+    frames_after: 2
+    crop_padding: 0.25          # AlexKapy: 15-25% padding around the box
+    max_side: 768
+  retreat:
+    observe_seconds: 12         # how long after a deterrent we watch
+    gone_frames: 15             # consecutive frames with no animal in zone = gone (tracker evidence)
+    use_vlm: true
+  policy:
+    type: "llm"                 # llm | fixed | random | rule_chain | bandit
+    max_attempts: 3             # after this many failed deterrents, escalate to the farmer
+    sound_cooldown_s: 20
+  include_location_in_prompt: false   # keep false: location hints made Claude answer from geography (~10% acc)
+  adaptive_first_sound: true    # after each event the agent picks the next first alarm (cached; no LLM call in the alarm path)
+
+notifier:
+  language: "hi"                # hi | mr | en
+  channels: ["console"]         # console | telegram
+  voice_note: true              # gTTS voice note when telegram is enabled
+  nightly_summary_hour: 7
+
+memory:
+  db_path: "data/farmguard.sqlite"
+
+logging:
+  level: "INFO"
+  events_jsonl: "data/events.jsonl"
+  timing_csv: "data/timing.csv"

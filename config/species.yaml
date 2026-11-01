@@ -1,0 +1,61 @@
+# Crop-raiding species and the deterrents each one may receive.
+# The LLM policy can ONLY choose from `allowed_sounds` (seedling-agent allow-list pattern).
+# Sound ids map to files in sounds/<id>.wav. Generate placeholders with: farmguard make-sounds
+#
+# Sources for the choices (see docs/RESEARCH_NOTES.md):
+#   bee_swarm   - bee sounds used against elephants (Elemantra; dreamerarun repo)
+#   tiger_roar  - predator call used for boar/monkey/elephant (durian YOLOv5-SSD paper)
+#   gunshot     - used against monkeys (SentaFito53 repo)
+#   boar_alarm  - conspecific alarm calls for wild boar (ZHAW study)
+#   dog_bark, siren, drum_beat, human_shout - common farm deterrents
+
+sounds:
+  bee_swarm:   {label: "Bee swarm"}
+  tiger_roar:  {label: "Tiger roar"}
+  leopard_growl: {label: "Leopard growl"}
+  gunshot:     {label: "Gunshot / firecracker"}
+  dog_bark:    {label: "Dog barking"}
+  boar_alarm:  {label: "Boar alarm call"}
+  siren:       {label: "Siren"}
+  drum_beat:   {label: "Drum beat"}
+  human_shout: {label: "Human shouting"}
+
+species:
+  wild_boar:
+    aliases: ["wild boar", "boar", "pig", "wild pig"]
+    hindi: "जंगली सूअर"
+    marathi: "रानडुक्कर"
+    danger: 3
+    default_sound: boar_alarm
+    allowed_sounds: [boar_alarm, tiger_roar, dog_bark, gunshot, siren, human_shout]
+  nilgai:
+    aliases: ["nilgai", "blue bull", "antelope", "deer"]
+    hindi: "नीलगाय"
+    marathi: "नीलगाय"
+    danger: 2
+    default_sound: dog_bark
+    allowed_sounds: [dog_bark, siren, human_shout, drum_beat, gunshot, tiger_roar]
+  monkey:
+    aliases: ["monkey", "macaque", "langur", "primate"]
+    hindi: "बंदर"
+    marathi: "माकड"
+    danger: 2
+    default_sound: gunshot
+    allowed_sounds: [gunshot, dog_bark, leopard_growl, human_shout, drum_beat, siren]
+  elephant:
+    aliases: ["elephant"]
+    hindi: "हाथी"
+    marathi: "हत्ती"
+    danger: 5
+    default_sound: bee_swarm
+    allowed_sounds: [bee_swarm, tiger_roar, siren, drum_beat]
+  stray_cattle:
+    aliases: ["cow", "cattle", "bull", "buffalo", "ox"]
+    hindi: "आवारा पशु"
+    marathi: "मोकाट जनावर"
+    danger: 1
+    default_sound: human_shout
+    allowed_sounds: [human_shout, dog_bark, drum_beat, siren]
+
+# Classes the detector may output that are never deterred.
+non_targets: ["person", "car", "truck", "motorcycle", "bicycle"]

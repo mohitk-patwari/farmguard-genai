@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "farmguard"
+version = "0.1.0"
+description = "Two-speed GenAI agent for animal intrusion deterrence from farm video"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "pyyaml>=6",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+vision = ["ultralytics>=8.3", "torch", "torchvision"]
+audio = ["pygame>=2.5"]
+genai = ["google-genai", "anthropic", "gTTS"]
+app = ["streamlit>=1.35", "matplotlib", "pandas"]
+dev = ["pytest>=8", "ruff"]
+all = ["farmguard[vision,audio,genai,app,dev]"]
+
+[project.scripts]
+farmguard = "farmguard.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["farmguard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
