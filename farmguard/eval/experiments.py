@@ -61,7 +61,8 @@ def provenance(client: LLMClient | None = None) -> dict[str, Any]:
         except (OSError, subprocess.TimeoutExpired):
             return ""
     return {"date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "commit": git("rev-parse", "--short", "HEAD"), "dirty": bool(git("status", "--porcelain")),
+            "commit": git("rev-parse", "--short", "HEAD"),
+            "dirty": bool(git("status", "--porcelain", "--", ".", ":(exclude)paper")),
             "provider": client.name if client else None, "model": client.model if client else None}
 
 
