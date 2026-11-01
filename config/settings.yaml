@@ -15,11 +15,16 @@ motion_gate:
 
 detector:
   backend: "ultralytics"        # ultralytics | mock
-  model: "yolov8s-worldv2.pt"   # YOLO-World (open vocabulary) or a fine-tuned yolov8n.pt
-  open_vocabulary: true         # true = call set_classes() with the names below
+  model: "weights/yolov8s-worldv2-farmguard.pt"   # made by scripts/bake_world_vocab.py from the classes below
+  open_vocabulary: false        # true = call set_classes() at startup: needs CLIP on disk (338 MB download), so keep false
   classes: ["wild boar", "nilgai", "monkey", "elephant", "cow", "dog", "deer"]
   ignore_classes: ["person", "car", "truck", "motorcycle"]
-  confidence: 0.25
+  confidence: 0.25              # boxes below this are kept only if they continue an existing track
+  track_conf: 0.1               # what ByteTrack sees. Passing 0.25 here would switch off its low-score second stage (track_low_thresh 0.1)
+  clahe:
+    enabled: false              # contrast equalisation before detection, for night; see docs/HANDOFF.md for measured effect
+    clip_limit: 2.0
+    grid: 8
   imgsz: 640
   device: ""                    # "" = auto, "cpu", "cuda:0", "mps"
   tracker: "bytetrack.yaml"
