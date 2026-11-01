@@ -48,9 +48,9 @@ WEEK = {"week", "hafta", "hafte", "हफ्ता", "हफ्ते", "हफ�
 
 TEMPLATES = {
     "hi": {"none": "इस अवधि में कोई घटना दर्ज नहीं है", "cite": "घटना",
-           "head": "{n} घटनाएँ: {by}। {left} बार जानवर खेत से चला गया, {other} बार जाना पक्का नहीं।"},
+           "head": "कुल घटनाएँ: {n} ({by})। {left} बार जानवर खेत से चला गया, {other} बार जाना पक्का नहीं।"},
     "mr": {"none": "या कालावधीत कोणतीही घटना नोंदलेली नाही", "cite": "घटना",
-           "head": "{n} घटना: {by}. {left} वेळा प्राणी शेतातून निघून गेला, {other} वेळा गेल्याची खात्री नाही."},
+           "head": "एकूण घटना: {n} ({by}). {left} वेळा प्राणी शेतातून निघून गेला, {other} वेळा गेल्याची खात्री नाही."},
     "en": {"none": "No events recorded in this period", "cite": "event",
            "head": "{n} event(s): {by}. The animal left {left} time(s); not confirmed {other} time(s)."},
 }
