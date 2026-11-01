@@ -17,11 +17,11 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from farmguard.config import load_config  # noqa: E402
-from farmguard.fast.pipeline import annotate  # noqa: E402
-from farmguard.fast.video_source import VideoSource  # noqa: E402
-from farmguard.system import build_system, run_video  # noqa: E402
-from farmguard.tools import make_demo, make_sounds  # noqa: E402
+from farmguard.config import load_config
+from farmguard.fast.pipeline import annotate
+from farmguard.fast.video_source import VideoSource
+from farmguard.system import build_system, run_video
+from farmguard.tools import make_demo, make_sounds
 
 st.set_page_config(page_title="FarmGuard GenAI", layout="wide")
 st.title("FarmGuard: GenAI agent for animal intrusion deterrence")

@@ -39,7 +39,7 @@ class ZoneSet:
         self.anchor = anchor
 
     @classmethod
-    def load(cls, path: str | Path, anchor: str = "bottom_center") -> "ZoneSet":
+    def load(cls, path: str | Path, anchor: str = "bottom_center") -> ZoneSet:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         zones = [Zone(z["name"], [tuple(p) for p in z["points"]], z.get("target_species", []))
                  for z in data["zones"]]
@@ -47,11 +47,11 @@ class ZoneSet:
         return cls(zones, size, anchor)
 
     @classmethod
-    def full_frame(cls, width: int, height: int) -> "ZoneSet":
+    def full_frame(cls, width: int, height: int) -> ZoneSet:
         return cls([Zone("field", [(0, 0), (width, 0), (width, height), (0, height)])],
                    (width, height))
 
-    def rescaled(self, width: int, height: int) -> "ZoneSet":
+    def rescaled(self, width: int, height: int) -> ZoneSet:
         """Zones are drawn on one resolution; rescale if frames arrive at another."""
         if not self.frame_size or tuple(self.frame_size) == (width, height):
             return self

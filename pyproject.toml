@@ -34,3 +34,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 110
+
+[tool.ruff.lint]
+# BLE001: broad excepts are deliberate. Every GenAI step needs a fallback and the alarm thread must
+# never die (CLAUDE.md invariant 4), whatever a provider SDK or audio backend raises.
+ignore = ["BLE001"]

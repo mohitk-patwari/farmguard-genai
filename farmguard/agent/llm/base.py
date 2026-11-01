@@ -37,7 +37,7 @@ def extract_json(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     cleaned = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.S)
+    fence = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
     if fence:
         cleaned = fence.group(1).strip()
     try:
@@ -45,7 +45,7 @@ def extract_json(text: str) -> dict[str, Any] | None:
         return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
         pass
-    m = re.search(r"\{.*\}", cleaned, re.S)  # first {...} block
+    m = re.search(r"\{.*\}", cleaned, re.DOTALL)  # first {...} block
     if m:
         try:
             obj = json.loads(m.group(0))

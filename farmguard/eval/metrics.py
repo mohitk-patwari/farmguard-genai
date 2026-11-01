@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections import Counter
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 
 def percentile(vals: Sequence[float], q: float) -> float:

@@ -15,9 +15,10 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from farmguard.agent.clip_builder import build_event_images
 from farmguard.agent.memory import Memory, hour_bucket
@@ -71,7 +72,7 @@ class AgentWorker:
         self.policy = policy
         self.notifier = notifier
         self.on_result = on_result
-        self.queue: "queue.Queue[IntrusionEvent | None]" = queue.Queue()
+        self.queue: queue.Queue[IntrusionEvent | None] = queue.Queue()
         self.results: list[EventResult] = []
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vlm")
         self._thread = threading.Thread(target=self._loop, daemon=True, name="agent")
@@ -79,7 +80,7 @@ class AgentWorker:
         self.first_sound_cache: dict[str, str] | None = None  # set by build_system (shared with fast path)
         self._jsonl = cfg.path("logging.events_jsonl") if cfg.get("logging.events_jsonl") else None
 
-    def start(self) -> "AgentWorker":
+    def start(self) -> AgentWorker:
         self._thread.start()
         return self
 

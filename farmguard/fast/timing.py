@@ -35,8 +35,8 @@ class StageTimer:
 
 class LatencyLog:
     """One row per alarm: frame read -> detect done -> alarm requested -> audio started."""
-    FIELDS = ["event_id", "sound", "reason", "agent_enabled", "t_read", "t_detect_done",
-              "t_alarm_requested", "t_alarm_started", "read_to_request_ms", "read_to_start_ms"]
+    FIELDS = ("event_id", "sound", "reason", "agent_enabled", "t_read", "t_detect_done",
+              "t_alarm_requested", "t_alarm_started", "read_to_request_ms", "read_to_start_ms")
 
     def __init__(self, path: str | Path | None, agent_enabled: bool):
         self.path = Path(path) if path else None

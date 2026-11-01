@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from farmguard.agent.llm.providers import build_client
 from farmguard.agent.memory import Memory

@@ -14,9 +14,9 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -54,13 +54,13 @@ class AlarmPlayer:
             import pygame
             pygame.mixer.init()  # importable is not enough: this raises when there is no audio device
             return "pygame"
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("pygame unavailable: %s", exc)
         try:
             import simpleaudio  # noqa: F401
             return "simpleaudio"
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("simpleaudio unavailable: %s", exc)
         if platform.system() == "Linux" and shutil.which("aplay"):
             return "aplay"
         if platform.system() == "Darwin" and shutil.which("afplay"):

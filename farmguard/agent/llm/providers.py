@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import requests
 
@@ -74,9 +75,9 @@ class AnthropicClient(LLMClient):
         content.append({"type": "text", "text": prompt})
         tool = {"name": "answer", "description": "Return the answer in this exact structure.",
                 "input_schema": schema}
-        kwargs: dict[str, Any] = dict(model=self.model, max_tokens=800, temperature=self.temperature,
-                                      messages=[{"role": "user", "content": content}],
-                                      tools=[tool], tool_choice={"type": "tool", "name": "answer"})
+        kwargs: dict[str, Any] = {"model": self.model, "max_tokens": 800, "temperature": self.temperature,
+                                  "messages": [{"role": "user", "content": content}],
+                                  "tools": [tool], "tool_choice": {"type": "tool", "name": "answer"}}
         if system:
             kwargs["system"] = system
         resp = self.client.messages.create(**kwargs)
@@ -154,7 +155,7 @@ def build_client(cfg, role: str = "vlm") -> LLMClient:
     """role = "vlm" (images) or "llm" (text). Both use agent.provider."""
     provider = cfg.get("agent.provider", "ollama")
     model = cfg.get(f"agent.{role}_model") or cfg.get("agent.vlm_model")
-    kw = dict(temperature=cfg.get("agent.temperature", 0.2), timeout_s=cfg.get("agent.timeout_s", 120))
+    kw = {"temperature": cfg.get("agent.temperature", 0.2), "timeout_s": cfg.get("agent.timeout_s", 120)}
     if provider == "ollama":
         return OllamaClient(model, **kw)
     if provider == "gemini":

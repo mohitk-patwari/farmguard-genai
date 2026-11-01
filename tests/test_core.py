@@ -7,8 +7,7 @@ import pytest
 from farmguard.agent.llm.base import extract_json
 from farmguard.agent.llm.providers import MockClient
 from farmguard.agent.memory import Memory
-from farmguard.agent.policy import (BanditPolicy, FixedPolicy, LLMPolicy, PolicyContext,
-                                    RuleChainPolicy)
+from farmguard.agent.policy import BanditPolicy, FixedPolicy, LLMPolicy, PolicyContext, RuleChainPolicy
 from farmguard.agent.retreat import fuse, tracker_evidence
 from farmguard.agent.validators import ESCALATE, ValidationContext, validate
 from farmguard.config import load_config

@@ -52,8 +52,8 @@ def vlm_prompt(species_keys: list[str], n_images: int, layout: str,
         f"2. species: choose exactly one from this list: {cats}.",
         "   Use 'unclassifiable' if you cannot tell. Use 'none' if no animal is visible.",
         "3. count: number of animals of that species visible.",
-        "4. behaviour: eating (head down at crops/plants), moving_through, resting, leaving "
-        "(moving away / out of frame), absent, or unclear.",
+        ("4. behaviour: eating (head down at crops/plants), moving_through, resting, leaving "
+         "(moving away / out of frame), absent, or unclear."),
         "5. confidence: high, medium or low.",
         "6. note: one short sentence.",
         "Base every answer only on what is visible in the images.",
@@ -81,15 +81,15 @@ def retreat_schema() -> dict[str, Any]:
 
 def retreat_prompt(n_images: int, species_label: str) -> str:
     return "\n".join([
-        f"These {n_images} images are consecutive frames of a crop field, oldest first, taken "
-        f"in the seconds after a deterrent sound was played to scare away a {species_label}.",
+        (f"These {n_images} images are consecutive frames of a crop field, oldest first, taken "
+         f"in the seconds after a deterrent sound was played to scare away a {species_label}."),
         "Decide the animal's status in the LAST frames:",
         "  gone          - no animal visible in the field any more",
         "  leaving       - the animal is clearly moving out of the field",
         "  still_present - the animal is still in the field (eating, standing or wandering)",
         "  uncertain     - you cannot tell (darkness, blur, occlusion)",
-        "First write a short observation, then the status, the number of animals still visible "
-        "in the last frame, and your confidence. Reply with JSON only.",
+        ("First write a short observation, then the status, the number of animals still visible "
+         "in the last frame, and your confidence. Reply with JSON only."),
     ])
 
 
@@ -115,10 +115,10 @@ def policy_prompt(context: dict[str, Any]) -> str:
     return "\n".join([
         "An animal is in the crop field and the previous deterrent did not make it leave.",
         "Choose the next action. Guidelines:",
-        "- Animals habituate: avoid sounds that were just tried in this event and sounds that "
-        "recently failed for this species at this time of day.",
-        "- Prefer sounds with a high past success rate for this species, but sometimes try a "
-        "less-used sound when the evidence is thin (few trials).",
+        ("- Animals habituate: avoid sounds that were just tried in this event and sounds that "
+         "recently failed for this species at this time of day."),
+        ("- Prefer sounds with a high past success rate for this species, but sometimes try a "
+         "less-used sound when the evidence is thin (few trials)."),
         "- If the animal is eating, act decisively; if it is already leaving, a milder sound is fine.",
         "- Choose 'escalate_farmer' only if no allowed sound is likely to work.",
         "",
@@ -148,8 +148,8 @@ def alert_prompt(summary: dict[str, Any], language: str) -> str:
         f"Write an alert for a farmer in {lang}. Use very simple words a farmer would use.",
         "Facts (use ONLY these, do not add anything):",
         json.dumps(summary, ensure_ascii=False, indent=1),
-        "message: at most 3 short sentences: what animal came and when, what sounds were played, "
-        "and whether it left. If it did not leave, ask the farmer to check the field.",
+        ("message: at most 3 short sentences: what animal came and when, what sounds were played, "
+         "and whether it left. If it did not leave, ask the farmer to check the field."),
         "voice_text: the same content as one or two sentences, for text-to-speech.",
         "Reply with JSON only.",
     ])

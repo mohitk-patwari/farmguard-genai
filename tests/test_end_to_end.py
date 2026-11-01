@@ -1,7 +1,6 @@
 """Full system on a synthetic video with MockDetector + MockClient (no GPU, no network)."""
 from __future__ import annotations
 
-
 from farmguard.agent.llm.providers import MockClient
 from farmguard.config import load_config
 from farmguard.fast.video_source import VideoSource

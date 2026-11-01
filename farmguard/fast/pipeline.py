@@ -9,7 +9,7 @@ import json
 import logging
 import queue
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import cv2
 import numpy as np
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 class FastPath:
     def __init__(self, cfg: Config, detector: Detector, zones: ZoneSet | None, alarm: AlarmPlayer,
-                 buffer: FrameBuffer, event_queue: "queue.Queue[IntrusionEvent] | None",
+                 buffer: FrameBuffer, event_queue: queue.Queue[IntrusionEvent] | None,
                  latency_log: LatencyLog | None = None,
                  on_frame: Callable[[FramePacket, list[IntrusionEvent]], None] | None = None):
         self.cfg = cfg

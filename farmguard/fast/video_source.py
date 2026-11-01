@@ -10,7 +10,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Iterator
+from collections.abc import Iterator
 
 import cv2
 import numpy as np
