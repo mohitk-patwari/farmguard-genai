@@ -51,7 +51,7 @@ class FastPath:
         # species -> first sound recommended by the agent after the previous event (written by
         # the agent thread, read here; a dict lookup, so the alarm path still never waits on an LLM)
         self.first_sound_override: dict[str, str] = {}
-        self._pending_latency: dict[str, tuple[float, float]] = {}
+        self._pending_latency: dict[str, tuple[float, float, float]] = {}
         self._last_dets: list[Detection] = []
         self._events_jsonl = cfg.path("logging.events_jsonl") if cfg.get("logging.events_jsonl") else None
         prev = alarm.on_played
@@ -60,9 +60,9 @@ class FastPath:
     # ---- alarm latency bookkeeping -----------------------------------------------------
     def _on_alarm_played(self, rec: AlarmRecord) -> None:
         if rec.event_id and rec.event_id in self._pending_latency and self.latency_log:
-            t_read, t_det = self._pending_latency.pop(rec.event_id)
+            t_read, t_det, t_first = self._pending_latency.pop(rec.event_id)
             self.latency_log.add(rec.event_id, rec.sound, rec.reason, t_read, t_det,
-                                 rec.t_requested, rec.t_started)
+                                 rec.t_requested, rec.t_started, t_first, rec.backend, rec.ok)
 
     # ---- helpers -------------------------------------------------------------------------
     def _first_sound(self, species: str) -> str:
@@ -85,7 +85,8 @@ class FastPath:
             self.zones = self.zones.rescaled(frame.shape[1], frame.shape[0])
 
         t0 = time.perf_counter()
-        if self.motion.should_run(frame, tracks_active=bool(self._last_dets)):
+        ran_detector = self.motion.should_run(frame, tracks_active=bool(self._last_dets))
+        if ran_detector:
             dets = self.detector.detect(frame, idx)
             self._last_dets = dets
         else:
@@ -97,14 +98,17 @@ class FastPath:
         min_area = self.cfg.get("trigger.min_box_area_frac", 0.0) * frame.shape[0] * frame.shape[1]
         self.trigger.min_box_area = min_area
         in_zone = [(d, z) for d in targets if (z := self.zones.zone_of(d))]
-        hits = self.trigger.update(in_zone, {Trigger.key_for(d) for d in targets}, video_time)
+        # Only real detector runs vote: carried-forward boxes would let one false positive on a still
+        # scene collect all 4 votes by itself.
+        hits = (self.trigger.update(in_zone, {Trigger.key_for(d) for d in targets}, video_time, t_read)
+                if ran_detector else [])
 
         new_events: list[IntrusionEvent] = []
         for hit in hits:
             det = hit.detection
             sound = self._first_sound(det.species)
             event_id = IntrusionEvent.new_id()
-            self._pending_latency[event_id] = (t_read, t_det)
+            self._pending_latency[event_id] = (t_read, t_det, hit.first_stamp)
             rec = self.alarm.play(sound, reason="first_alarm", event_id=event_id)  # non-blocking
             ev = IntrusionEvent(event_id=event_id, species=det.species, label=det.label,
                                 track_id=det.track_id, video_time=video_time, frame_index=idx,
@@ -140,7 +144,13 @@ class FastPath:
         finally:
             self.buffer.finish()
             if self.latency_log:
-                time.sleep(0.2)  # let the alarm thread record the last start times
+                # Wait for the alarm thread: a fixed sleep would drop exactly the slowest alarms.
+                deadline = time.monotonic() + 10.0
+                while self._pending_latency and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                if self._pending_latency:
+                    log.error("%d alarms never started; not in the latency log",
+                              len(self._pending_latency))
                 self.latency_log.save()
 
 

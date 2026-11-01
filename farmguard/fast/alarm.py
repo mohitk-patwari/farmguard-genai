@@ -84,11 +84,15 @@ class AlarmPlayer:
     # ---- worker ------------------------------------------------------------------------
     def _loop(self) -> None:
         pg = None
+        loaded: dict[str, object] = {}
         if self.backend == "pygame":
             try:  # backend="pygame" set explicitly skips _pick_backend's check
                 import pygame
                 pygame.mixer.init()
                 pg = pygame
+                # Decode up front: real recordings are large, and the disk read must not sit on the
+                # alarm path.
+                loaded = {p.stem: pg.mixer.Sound(str(p)) for p in self.sounds_dir.glob("*.wav")}
             except Exception:
                 log.exception("pygame audio unavailable, alarms will be log-only")
                 self.backend = "none"
@@ -98,14 +102,13 @@ class AlarmPlayer:
                 return
             rec.backend = self.backend
             path = self.path_for(rec.sound)
-            rec.t_started = time.perf_counter()
             try:
                 if self.backend == "none":
                     rec.ok = True
                 elif not path.exists():
                     raise FileNotFoundError(f"{path} (run: farmguard make-sounds)")
                 elif self.backend == "pygame":
-                    pg.mixer.Sound(str(path)).play()
+                    (loaded.get(rec.sound) or pg.mixer.Sound(str(path))).play()
                     rec.ok = True
                 elif self.backend == "simpleaudio":
                     import simpleaudio
@@ -115,6 +118,10 @@ class AlarmPlayer:
                     subprocess.Popen([self.backend, str(path)], stdout=subprocess.DEVNULL,
                                      stderr=subprocess.DEVNULL)
                     rec.ok = True
+                # Stamped after the play call so E1 includes it. A failed alarm keeps t_started=0
+                # and logs an empty read_to_start_ms, so it can't count as a fast alarm. Mixer and
+                # driver output delay are still not included (see docs/HANDOFF.md).
+                rec.t_started = time.perf_counter()
             except Exception as exc:  # never crash the alarm thread
                 rec.error = str(exc)
                 log.error("Alarm failed: %s", exc)

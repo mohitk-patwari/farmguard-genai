@@ -52,7 +52,8 @@ def make_sounds(out_dir: str | Path, seconds: float = 4.0, seed: int = 0) -> lis
     paths = []
     for name, x in sounds.items():
         p = out / f"{name}.wav"
-        _write_wav(p, np.asarray(x, dtype=float))
+        if not p.exists():  # setup scripts call this: never overwrite a real recording in sounds/
+            _write_wav(p, np.asarray(x, dtype=float))
         paths.append(p)
     return paths
 

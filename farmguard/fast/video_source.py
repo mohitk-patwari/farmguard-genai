@@ -30,9 +30,14 @@ class VideoSource:
         self.cap = cv2.VideoCapture(source)
         if not self.cap.isOpened():
             raise RuntimeError(f"Cannot open video source: {source!r}")
+        if live:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # stale frames queued in the driver hide latency
         fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.native_fps = fps if fps and fps > 1 else 25.0
         self._stop = threading.Event()
+        self._eof = threading.Event()
+        self._is_file = isinstance(source, str) and "://" not in source
+        self.dropped = 0  # live mode: frames replaced before the detector saw them (E1 load report)
         self._q: queue.Queue = queue.Queue(maxsize=1)
 
     def _resize(self, frame: np.ndarray) -> np.ndarray:
@@ -60,9 +65,16 @@ class VideoSource:
     def _capture_loop(self) -> None:
         idx, t0 = 0, time.perf_counter()
         while not self._stop.is_set():
+            if self._is_file:  # a file in live mode behaves like a camera: frames arrive on time
+                delay = idx / self.native_fps - (time.perf_counter() - t0)
+                if delay > 0:
+                    time.sleep(delay)
             ok, frame = self.cap.read()
             t_read = time.perf_counter()
             if not ok:
+                if self._is_file:
+                    self._eof.set()
+                    return
                 time.sleep(0.05)
                 continue
             item = (idx, t_read - t0, self._resize(frame), t_read)
@@ -71,6 +83,7 @@ class VideoSource:
             except queue.Full:  # drop the stale frame, keep the newest
                 try:
                     self._q.get_nowait()
+                    self.dropped += 1
                 except queue.Empty:
                     pass
                 self._q.put_nowait(item)
@@ -82,8 +95,10 @@ class VideoSource:
         last = 0.0
         while not self._stop.is_set():
             try:
-                item = self._q.get(timeout=1.0)
+                item = self._q.get(timeout=0.2)
             except queue.Empty:
+                if self._eof.is_set():
+                    return
                 continue
             if min_gap and item[3] - last < min_gap:
                 continue
