@@ -40,4 +40,10 @@ Assert-Ok "make-demo"
 & $py -m pytest -q
 Assert-Ok "pytest"
 
+# Embed the detector vocabulary while online, so runtime needs no CLIP. Mock runs don't need this.
+if (-not (Test-Path weights\yolov8s-worldv2-farmguard.pt)) {
+    & $py scripts\bake_world_vocab.py
+    if ($LASTEXITCODE -ne 0) { Write-Warning "bake_world_vocab failed: the real detector won't start until it succeeds; mock runs still work." }
+}
+
 Write-Host "Done. Try: $py -m farmguard.cli run --source data/demo/demo.mp4 --mock-annotations data/demo/demo_annotations.json --zones data/demo/demo_zones.json --provider mock"

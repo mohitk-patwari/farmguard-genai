@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vision = ["ultralytics>=8.3", "torch", "torchvision"]
+vision = ["ultralytics>=8.3", "lap>=0.5.12", "torch", "torchvision"]
 audio = ["pygame>=2.5"]
 genai = ["google-genai", "anthropic", "gTTS"]
 app = ["streamlit>=1.50", "matplotlib", "pandas"]

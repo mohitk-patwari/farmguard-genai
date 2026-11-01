@@ -82,6 +82,8 @@ def load_config(settings: str | Path | None = None, species: str | Path | None =
         for part in parts[:-1]:
             node = node.setdefault(part, {})
         node[parts[-1]] = value
+    if os.environ.get("FARMGUARD_MUTE") == "1":  # after overrides: mute must win over everything
+        raw.setdefault("alarm", {})["backend"] = "none"  # alarms are still logged and timed
     sp = yaml.safe_load(species_path.read_text(encoding="utf-8")) or {}
     species_map = {
         key: SpeciesInfo(

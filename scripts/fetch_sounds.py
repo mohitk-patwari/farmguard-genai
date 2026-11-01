@@ -113,8 +113,8 @@ def main() -> None:
         sf.write(str(ROOT / "sounds" / f"{sound}.wav"), out, sr, subtype="PCM_16")
         print(f"{sound}: {len(out) / sr:.1f} s at {sr} Hz")
     lines = ["# Deterrent sound sources", "",
-             "Made by `scripts/fetch_sounds.py`. Each file is the loudest part of the original, "
-             f"at most {CLIP_SECONDS:.0f} s, mono, peak-normalised.",
+             ("Made by `scripts/fetch_sounds.py`. Each file is the loudest part of the original, "
+             f"at most {CLIP_SECONDS:.0f} s, mono, peak-normalised."),
              "None of these has been tested on animals. Whether a sound deters anything is a field question.", "",
              "| Sound id | Recording | Author | Licence | Caveat |", "|---|---|---|---|---|"]
     for sound, s in SOURCES.items():

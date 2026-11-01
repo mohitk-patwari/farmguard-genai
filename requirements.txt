@@ -7,6 +7,7 @@ pytest>=8
 
 # Vision (real detector): YOLOv8 / YOLO-World + ByteTrack
 ultralytics>=8.3
+lap>=0.5.12  # ByteTrack; without it ultralytics runs pip from inside the frame loop
 
 # Audio playback (alarm). Without it the alarm falls back to aplay/afplay or log-only.
 pygame>=2.5

@@ -41,6 +41,7 @@ def test_box_conversion_and_clipping():
 
 def test_build_keeps_a_group_together_and_skips_unlabelled(tmp_path, monkeypatch):
     import csv
+
     import cv2
     monkeypatch.setattr(pd, "RAW", tmp_path / "raw")
     monkeypatch.setattr(pd, "OUT", tmp_path / "yolo")

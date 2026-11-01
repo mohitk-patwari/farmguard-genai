@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import queue
 import threading
 import time
@@ -134,4 +135,4 @@ def test_live_file_ends_paces_and_counts_drops(tmp_path):
     src.release()
     assert time.perf_counter() - t0 >= 0.8  # 30 frames at 30 fps: paced like a camera
     assert src.dropped > 0 and len(got) + src.dropped <= 30
-    assert all(a[3] < b[3] for a, b in zip(got, got[1:]))
+    assert all(a[3] < b[3] for a, b in itertools.pairwise(got))

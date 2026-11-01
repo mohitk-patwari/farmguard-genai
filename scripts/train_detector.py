@@ -22,7 +22,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from farmguard.fast.detector import apply_clahe  # noqa: E402
+from farmguard.fast.detector import apply_clahe
 
 DATA = ROOT / "data" / "yolo"
 WEIGHTS = ROOT / "weights" / "farmguard_yolov8n.pt"

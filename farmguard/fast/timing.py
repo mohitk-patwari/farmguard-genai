@@ -45,7 +45,8 @@ class LatencyLog:
     def __init__(self, path: str | Path | None, agent_enabled: bool):
         self.path = Path(path) if path else None
         self.agent_enabled = agent_enabled
-        self.rows: list[dict] = []
+        self.rows: list[dict] = []  # kept after save(): eval.experiments.e1_run reads them post-run
+        self._saved = 0
         self._lock = threading.Lock()
 
     def add(self, event_id: str | None, sound: str, reason: str, t_read: float,
@@ -64,7 +65,7 @@ class LatencyLog:
             self.rows.append(row)
 
     def save(self) -> None:
-        if not self.path or not self.rows:
+        if not self.path or self._saved >= len(self.rows):
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():  # appending new columns under an old header would misalign the CSV
@@ -77,5 +78,5 @@ class LatencyLog:
             w = csv.DictWriter(fh, fieldnames=self.FIELDS)
             if new:
                 w.writeheader()
-            w.writerows(self.rows)
-        self.rows = []  # a second save() must not write them twice
+            w.writerows(self.rows[self._saved:])
+        self._saved = len(self.rows)  # a second save() must not write them twice

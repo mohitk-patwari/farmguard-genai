@@ -240,8 +240,8 @@ def fetch_lila(per_class: int, seed: int = 0) -> None:
     base = "https://storage.googleapis.com/public-datasets-lila/nacti"
     meta_zip, md_zip = src / "nacti_metadata.json.zip", src / "nacti_md.json.zip"
     _download((f"{base}/nacti_metadata.1.14.json.zip", meta_zip))
-    _download(("https://lila.science/public/lila-md-results/"
-               "nacti_mdv5a.0.0_results.filtered_rde_0.150_0.850_50_0.200.json.zip", md_zip))
+    _download((("https://lila.science/public/lila-md-results/"
+               "nacti_mdv5a.0.0_results.filtered_rde_0.150_0.850_50_0.200.json.zip"), md_zip))
     with zipfile.ZipFile(meta_zip) as z, z.open(z.namelist()[0]) as fh:
         meta = json.load(fh)
     cats = {c["id"]: c["name"].lower() for c in meta["categories"]}
@@ -311,7 +311,7 @@ def fetch_commons_clips() -> None:
     out = ROOT / "data" / "clips"
     lines = ["# Clip sources (Wikimedia Commons)", "", "Not farm CCTV. Downloaded by `scripts/prepare_data.py commons-clips`.", "",
              "| File | Author | Licence | Description | Page |", "|---|---|---|---|---|"]
-    clean = lambda s: re.sub(r"\s+", " ", re.sub("<[^>]+>", "", s or "")).strip().replace("|", "/")[:120]  # noqa: E731
+    clean = lambda s: re.sub(r"\s+", " ", re.sub("<[^>]+>", "", s or "")).strip().replace("|", "/")[:120]
     for cls, titles in COMMONS_CLIPS.items():
         for title in titles:
             time.sleep(6)  # Commons returns 429 to anything faster

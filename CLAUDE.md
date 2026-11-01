@@ -43,7 +43,7 @@ config/settings.yaml   all runtime knobs     config/species.yaml  species, alias
 config/sim.yaml        simulator assumptions config/zones.json    field polygon (farmguard draw-zone)
 farmguard/fast/        video_source, motion, detector, zones, trigger, alarm, timing, framebuffer, pipeline
 farmguard/agent/       llm/{base,providers}, prompts, clip_builder, vlm_check, retreat, policy,
-                       validators, memory, notifier, orchestrator
+                       validators, memory, notifier, orchestrator, farmer (nightly summary, Q&A)
 farmguard/sim/         simulator.py (E4)     farmguard/eval/  metrics.py, experiments.py (E1-E6)
 farmguard/system.py    wires both layers     farmguard/cli.py  `farmguard run|simulate|eval|...`
 app/streamlit_app.py   classroom demo        tests/            pytest (mock detector + mock LLM)
@@ -52,14 +52,18 @@ app/streamlit_app.py   classroom demo        tests/            pytest (mock dete
 ## Commands
 ```bash
 pip install -e ".[dev]" && pip install -r requirements.txt
-python -m farmguard.cli make-sounds && python -m farmguard.cli make-demo
+python -m farmguard.cli make-sounds && python -m farmguard.cli make-demo   # never overwrites a WAV
+python scripts/bake_world_vocab.py                           # once, online: the real detector needs it
 pytest -q                                                    # must stay green
 python -m farmguard.cli run --source data/demo/demo.mp4 \
    --mock-annotations data/demo/demo_annotations.json --zones data/demo/demo_zones.json --provider mock
+python -m farmguard.cli run ... --mute                       # no audio, still logged (or FARMGUARD_MUTE=1)
 python -m farmguard.cli run --source data/clips/x.mp4 --provider ollama     # real YOLO-World + Qwen2.5-VL
 python -m farmguard.cli run --source data/clips/x.mp4 --no-agent           # E1 baseline
 python -m farmguard.cli simulate --policies fixed,random,rule_chain,bandit,llm --provider ollama
 python -m farmguard.cli eval e2 --provider ollama --labels data/labels/vlm_samples.csv
+python -m farmguard.eval <exp>                               # preferred: adds preflight + results log
+python -m farmguard.agent.farmer summary                     # or: ask "today" --language hi
 streamlit run app/streamlit_app.py
 ```
 

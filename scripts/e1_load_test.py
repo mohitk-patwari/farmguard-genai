@@ -26,11 +26,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from farmguard.agent.llm.providers import build_client  # noqa: E402
-from farmguard.config import load_config  # noqa: E402
-from farmguard.fast.trigger import Trigger  # noqa: E402
-from farmguard.fast.video_source import VideoSource  # noqa: E402
-from farmguard.system import build_system  # noqa: E402
+from farmguard.agent.llm.providers import build_client
+from farmguard.config import load_config
+from farmguard.fast.trigger import Trigger
+from farmguard.fast.video_source import VideoSource
+from farmguard.system import build_system
 
 log = logging.getLogger("e1_load")
 
@@ -90,7 +90,8 @@ def summarise(vals: list[float]) -> dict:
 def gpu_snapshot() -> str:
     try:
         return subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
-                               "--format=csv,noheader"], capture_output=True, text=True, timeout=10).stdout.strip()
+                               "--format=csv,noheader"], check=False, capture_output=True, text=True,
+                              timeout=10).stdout.strip()
     except OSError:
         return "n/a"
 

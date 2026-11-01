@@ -18,6 +18,10 @@ python -m farmguard.cli make-sounds
 python -m farmguard.cli make-demo
 pytest -q
 
+# Embed the detector vocabulary while online, so runtime needs no CLIP. Mock runs don't need this.
+[ -f weights/yolov8s-worldv2-farmguard.pt ] || python scripts/bake_world_vocab.py \
+  || echo "bake_world_vocab failed: the real detector won't start until it succeeds; mock runs still work."
+
 # Local VLM (free): https://ollama.com  then:
 if command -v ollama >/dev/null 2>&1; then
   ollama pull qwen2.5vl:7b || true
@@ -25,5 +29,4 @@ else
   echo "Ollama not found: install it from https://ollama.com or use --provider gemini/anthropic"
 fi
 
-# YOLO-World weights download automatically on first use (yolov8s-worldv2.pt).
 echo "Done. Try: python -m farmguard.cli run --source data/demo/demo.mp4 --mock-annotations data/demo/demo_annotations.json --zones data/demo/demo_zones.json --provider mock"

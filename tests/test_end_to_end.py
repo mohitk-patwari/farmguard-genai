@@ -1,7 +1,10 @@
 """Full system on a synthetic video with MockDetector + MockClient (no GPU, no network)."""
 from __future__ import annotations
 
+import pytest
+
 from farmguard.agent.llm.providers import MockClient
+from farmguard.cli import main
 from farmguard.config import load_config
 from farmguard.fast.video_source import VideoSource
 from farmguard.sim.simulator import load_sim, run_all, summarize
@@ -32,6 +35,29 @@ def test_demo_end_to_end(tmp_path):
     assert all(s in cfg.species["wild_boar"].allowed_sounds for s in sounds)
     assert res.farmer and res.farmer["message"]
     assert (tmp_path / "t.csv").exists()
+
+
+def test_mute_env_beats_overrides(monkeypatch):
+    over = {"alarm.backend": "pygame"}
+    monkeypatch.delenv("FARMGUARD_MUTE")
+    assert load_config(overrides=over).get("alarm.backend") == "pygame"
+    monkeypatch.setenv("FARMGUARD_MUTE", "1")
+    assert load_config(overrides=over).get("alarm.backend") == "none"
+
+
+def test_mute_flag_forces_backend_none(monkeypatch, tmp_path):
+    monkeypatch.delenv("FARMGUARD_MUTE")
+    demo = make_demo(tmp_path, seconds=1, fps=10, w=160, h=90)
+    seen = {}
+
+    def stop_after_config(cfg):
+        seen["backend"] = cfg.get("alarm.backend")
+        raise SystemExit
+
+    monkeypatch.setattr("farmguard.system.build_system", stop_after_config)
+    with pytest.raises(SystemExit):
+        main(["run", "--source", demo["video"], "--mute"])
+    assert seen["backend"] == "none"
 
 
 def test_simulator_runs():

@@ -32,6 +32,8 @@ def cmd_run(args) -> None:
         ov["zones.file"] = args.zones
     if args.language:
         ov["notifier.language"] = args.language
+    if args.mute:
+        ov["alarm.backend"] = "none"
     cfg = _cfg(args, ov)
     src = VideoSource(args.source or cfg.get("video.source"), live=args.live,
                       target_fps=cfg.get("video.target_fps", 10),
@@ -98,6 +100,8 @@ def main(argv=None) -> None:
     r.add_argument("--zones")
     r.add_argument("--language", help="hi|mr|en")
     r.add_argument("--max-frames", type=int)
+    r.add_argument("--mute", action="store_true",
+                   help="no audio; alarms still logged and timed (same as FARMGUARD_MUTE=1)")
     r.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("simulate", help="E4: compare deterrent policies in the simulator")
