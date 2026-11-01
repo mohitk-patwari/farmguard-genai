@@ -8,7 +8,6 @@ __pycache__/
 *.egg-info/
 runs/
 logs/
-sounds/*.wav
 data/*.jsonl
 data/*.csv
 data/demo/
