@@ -13,10 +13,12 @@ data/*.csv
 data/demo/
 data/clips/*
 !data/clips/README.md
+!data/clips/SOURCES.md
 data/synth/*
 !data/synth/README.md
 data/raw/
 data/yolo/
+weights/
 results/
 config/zones.json
 .pytest_cache/
