@@ -24,7 +24,7 @@ pytest -q
 
 # Local VLM (free): https://ollama.com  then:
 if command -v ollama >/dev/null 2>&1; then
-  ollama pull qwen2.5vl:7b || true
+  ollama pull qwen2.5vl:3b || true
 else
   echo "Ollama not found: install it from https://ollama.com or use --provider gemini/anthropic"
 fi

@@ -48,13 +48,15 @@ alarm:
 agent:
   enabled: true
   provider: "ollama"            # ollama | gemini | anthropic | openai_compat | mock
-  vlm_model: "qwen2.5vl:7b"
-  llm_model: "qwen2.5vl:7b"     # can be a text-only model; the policy step sends no images
+  vlm_model: "qwen2.5vl:3b"     # 7b needs more than this laptop's 6 GB VRAM (HANDOFF smoke test). On Colab set both to qwen2.5vl:7b
+  llm_model: "qwen2.5vl:3b"     # can be a text-only model; the policy step sends no images
   models:                       # per-provider ids; win over vlm_model/llm_model (those stay the Ollama tags)
     gemini: {vlm: "gemini-3.8-flash", llm: "gemini-3.8-flash"}
-    anthropic: {vlm: "claude-opus-5-5", llm: "claude-opus-5-5"}
+    anthropic: {vlm: "claude-haiku-5-5", llm: "claude-haiku-5-5"}   # opt-in, cheapest model
     # openai_compat: {vlm: "...", llm: "..."}   # depends on the server
-  temperature: 0.2              # null = don't send. Never sent to Anthropic (400 on API version 2026-10-21)
+  temperature: 0.2              # null = don't send. Anthropic always runs at default sampling (400 on API version 2026-10-21): state it in E2
+  ollama:
+    num_ctx: 4096               # sent per call. 8192 took free RAM to 1.5 GB on the laptop. 3b prompts must fit: see clip.max_side, clip.max_images
   timeout_s: 120                # per attempt
   max_retries: 2                # transient errors only (timeouts, connection, 408/409/425/429/5xx)
   backoff_base_s: 1.0           # 1 s, 2 s, ... with jitter; a Retry-After header wins if longer
@@ -63,7 +65,8 @@ agent:
     frames_before: 2            # neighbouring frames sent with the trigger frame
     frames_after: 2
     crop_padding: 0.25          # AlexKapy: 15-25% padding around the box
-    max_side: 768
+    max_side: 448               # longest side, event and retreat images. Qwen2.5-VL tokens scale with pixels
+    max_images: 4               # crop + full frame + 2 neighbours. Few-shot adds its own: raise num_ctx for that condition
   fewshot:                      # labelled examples sent before the event images (E2 ablates this)
     enabled: false              # off until E2 shows it helps on our model; BLIP's 7.61% -> 91.0% was another model and task
     dir: "data/fewshot"         # <dir>/<species key, none or other_animal>/*.jpg

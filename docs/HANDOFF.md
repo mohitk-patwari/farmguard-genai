@@ -22,9 +22,11 @@ Recorded 2026-11-02 on the lead laptop (Windows 11, 16 GB RAM, RTX 3050 6 GB, dr
   never run end to end: `scripts/train_detector.py`, `scripts/e1_load_test.py`,
   `prepare_data.py lila`, `pseudo-label`, `build`.
 - Agent (branch `agent`, 2026-11-01): providers fixed, retries + per-call latency logs, few-shot flag,
-  decision log + invalid-action rate, farmer summary and Q&A. All tested with mock clients and a local
-  fake HTTP server (real `requests` and real SDKs, fake responses). **No provider has been called live:**
-  Ollama is not installed here and no paid API was called. Fusion rules are NOT tuned (no labels yet).
+  decision log + invalid-action rate, farmer summary and Q&A. Tested with mock clients and a local fake
+  HTTP server. No paid API has been called. Fusion rules are NOT tuned (no labels yet).
+- Agent, 2026-11-03: fixes for the smoke test below (images, `num_ctx`, alert grounding, 3b default, policy
+  prompt). Unit-tested only. **The re-run did not happen:** it hit the 4 GB free-RAM limit 8 s in (started at
+  4339 MB; T1's 3b run started near 7 GB). So the VLM success rate after these fixes is still unknown.
 - Integration, 2026-11-02 (branch `main`). Merged vision, agent, experiments; only HANDOFF.md conflicted.
   `LatencyLog.save()` (vision) emptied the rows `e1_run` reads (experiments), so E1 reported 0 alarms: fixed
   in `fast/timing.py`. Added `--mute` / `FARMGUARD_MUTE=1`, `lap`, and the bake step in setup.
@@ -105,6 +107,12 @@ label until the detector is fine-tuned. Not re-run on the smoke-test clip yet. B
 yet: `scripts/tune_tracker.py` is written but not run, and `detector.tracker` is still the default.
 
 ## For Terminal 3 (agent)
+Status 2026-11-03: VLM overflow, alert checks and the policy prompt below are fixed, not yet re-measured live.
+Validator changes, from T1's decision log: all were in-event decisions (attempt 2+), so the real rate there is
+9/11 (7b) and 10/11 (3b); first-sound calls are never changed. 7b: 9 on cooldown, always its favourite sound.
+3b: 9 re-picked the sound just tried, 1 on cooldown. In both, 7 of the changes became a forced escalation
+because every sound was tried or on cooldown: `_last_played` is shared across events, and this clip has 11
+events in 10 s. Not changed: the enum still offers tried and cooldown sounds, so the rate stays measurable.
 From the smoke test (Terminal 1), first calls ever made to a live provider:
 - **The VLM event check always fails on Ollama.** `request (4311 tokens) exceeds the available context size
   (4096 tokens)`; 6 images need about 6500 tokens. `OllamaClient` sends no `num_ctx`. The agent falls back to
@@ -163,6 +171,13 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
 - **Needed for fusion tuning:** `data/labels/retreat_samples.csv` with a `split` column (dev/test by clip),
   and an E3 per-sample dump with `tracker_status, vlm_status, vlm_confidence`. `retreat.fusion_errors()` reads
   those columns plus `status`, uses dev rows only, and raises if `split` is missing.
+- From 2026-11-03: `build_event_images` defaults to 4 images at 448 px, so E2's burst condition is smaller than
+  before, and few-shot needs a larger `agent.ollama.num_ctx`. Default model is 3b, while `paper/main.tex` still
+  names `ollama-qwen2.5vl-7b` tables. The LLM alert prompt and policy prompt changed: older E4 and E6 LLM runs are
+  not comparable. The policy prompt no longer states habituation or eating/leaving advice. The bandit is still
+  stationary. Alerts that fail the fact check have source `template_ungrounded`, which E6 counts as
+  `template_fallback`. Failed VLM calls: `vlm` in `farmguard run` output, `vlm_failed` and
+  `attempts[].vlm_error` in events.jsonl.
 - E2: few-shot is `cfg.raw["agent"]["fewshot"]["enabled"]`, read on each `check()`, so flip it per condition like
   the location flag. Frames go in `data/fewshot/<species key|none|other_animal>/` (none are collected yet), kept out
   of the test clips. About 21 extra images per call at 3 per category, so report latency too. Labels name species,

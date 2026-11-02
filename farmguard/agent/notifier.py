@@ -15,6 +15,7 @@ import requests
 
 from farmguard.agent.llm.base import LLMClient
 from farmguard.agent.prompts import alert_prompt, alert_schema
+from farmguard.agent.validators import AlertFacts, alert_problems
 from farmguard.config import Config
 
 log = logging.getLogger(__name__)
@@ -29,22 +30,58 @@ STATUS_WORDS = {
 }
 
 
+SOUND_NAMES = {
+    "hi": {"bee_swarm": "मधुमक्खियों की आवाज़", "tiger_roar": "बाघ की आवाज़", "leopard_growl": "तेंदुए की आवाज़",
+           "gunshot": "पटाखे की आवाज़", "dog_bark": "कुत्ते की आवाज़", "boar_alarm": "सूअर की आवाज़",
+           "siren": "सायरन", "drum_beat": "ढोल", "human_shout": "आदमी के चिल्लाने की आवाज़"},
+    "mr": {"bee_swarm": "मधमाश्यांचा आवाज", "tiger_roar": "वाघाचा आवाज", "leopard_growl": "बिबट्याचा आवाज",
+           "gunshot": "फटाक्याचा आवाज", "dog_bark": "कुत्र्याचा आवाज", "boar_alarm": "डुकराचा आवाज",
+           "siren": "सायरन", "drum_beat": "ढोल", "human_shout": "माणसाच्या ओरडण्याचा आवाज"},
+}
+# Words for animals and sounds the alert must not name unless they happened. Not exhaustive.
+OTHER_WORDS = {
+    "hi": {"wild_boar": ["सूअर", "सूअरों"], "monkey": ["बंदरों"], "elephant": ["हाथियों"], "nilgai": ["नीलगायों"],
+           "stray_cattle": ["गाय", "गायें", "गायों", "बैल", "भैंस"]},
+    "mr": {"wild_boar": ["डुक्कर", "डुकरे"], "monkey": ["माकडे"], "elephant": ["हत्ती"], "nilgai": [],
+           "stray_cattle": ["गाय", "गाई", "बैल", "म्हैस"]},
+}
+SOUND_WORDS = {
+    "hi": {"bee_swarm": ["मधुमक्खी", "मधुमक्खियों"], "tiger_roar": ["बाघ"], "leopard_growl": ["तेंदुआ", "तेंदुए"],
+           "gunshot": ["पटाखा", "पटाखे", "बंदूक", "गोली"], "dog_bark": ["कुत्ता", "कुत्ते", "कुत्तों"],
+           "boar_alarm": [], "siren": ["सायरन"], "drum_beat": ["ढोल"], "human_shout": ["आदमी", "इंसान"]},
+    "mr": {"bee_swarm": ["मधमाशी", "मधमाश्यांचा", "मधमाश्या"], "tiger_roar": ["वाघ", "वाघाचा"],
+           "leopard_growl": ["बिबट्या", "बिबट्याचा"], "gunshot": ["फटाका", "फटाके", "फटाक्याचा", "बंदूक"],
+           "dog_bark": ["कुत्रा", "कुत्र्याचा", "कुत्रे"], "boar_alarm": [], "siren": ["सायरन"], "drum_beat": ["ढोल"],
+           "human_shout": ["माणूस", "माणसाच्या"]},
+}
+NUMBER_WORDS = {
+    "hi": {"एक": 1, "दो": 2, "तीन": 3, "चार": 4, "पांच": 5, "पाँच": 5, "छह": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10},
+    "mr": {"एक": 1, "दोन": 2, "तीन": 3, "चार": 4, "पाच": 5, "सहा": 6, "सात": 7, "आठ": 8, "नऊ": 9, "दहा": 10},
+    "en": {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10},
+}
+NON_LATIN = ("hi", "mr")
+
+
 def template_message(summary: dict[str, Any], language: str) -> str:
-    st = STATUS_WORDS.get(language, STATUS_WORDS["en"]).get(summary["final_status"], "")
-    sounds = ", ".join(summary["sounds_played"])
+    st = summary["status_local"]
+    sounds = ", ".join(summary["sounds_local"])
+    n = summary["count"]
     if language == "hi":
-        msg = (f"{summary['time']} बजे खेत में {summary['animal_local']} आया। "
+        count = f" (संख्या: {n})" if n > 1 else ""
+        msg = (f"{summary['time']} बजे खेत में {summary['animal_local']}{count} आया। "
                f"बजाई गई आवाज़ें: {sounds}। जानवर {st}।")
         if summary["final_status"] not in ("gone", "leaving"):
             msg += " कृपया खेत देखें।"
         return msg
     if language == "mr":
-        msg = (f"{summary['time']} वाजता शेतात {summary['animal_local']} आले. "
+        count = f" (संख्या: {n})" if n > 1 else ""
+        msg = (f"{summary['time']} वाजता शेतात {summary['animal_local']}{count} आले. "
                f"वाजवलेले आवाज: {sounds}. प्राणी {st}.")
         if summary["final_status"] not in ("gone", "leaving"):
             msg += " कृपया शेत तपासा."
         return msg
-    msg = (f"At {summary['time']} a {summary['animal']} entered the field. Sounds played: "
+    who = f"{n} x {summary['animal']}" if n > 1 else f"a {summary['animal']}"
+    msg = (f"At {summary['time']} {who} entered the field. Sounds played: "
            f"{sounds}. The animal {st}.")
     if summary["final_status"] not in ("gone", "leaving"):
         msg += " Please check the field."
@@ -70,19 +107,53 @@ class Notifier:
                       attempts: int, count: int, behaviour: str) -> dict[str, Any]:
         local = local_name(self.cfg, species, self.language)
         labels = [self.cfg.sounds.get(s, {}).get("label", s) for s in sounds]
-        return {"animal": species.replace("_", " "), "animal_local": local, "count": count,
+        names = SOUND_NAMES.get(self.language, {})
+        words = STATUS_WORDS.get(self.language, STATUS_WORDS["en"])
+        return {"species": species, "sound_ids": sounds,
+                "sounds_local": [names.get(s, label) for s, label in zip(sounds, labels)],
+                "status_local": words.get(final_status, final_status),
+                "animal": species.replace("_", " "), "animal_local": local, "count": count,
                 "time": time.strftime("%H:%M", time.localtime(wall_time)),
                 "behaviour_when_seen": behaviour, "sounds_played": labels,
                 "attempts": attempts, "final_status": final_status}
 
+    def _facts(self, summary: dict[str, Any], template: str) -> AlertFacts:
+        lang = self.language
+        sound_names = SOUND_NAMES.get(lang, {})
+        species_words = OTHER_WORDS.get(lang, {})
+        other: list[str] = []
+        for key, info in self.cfg.species.items():
+            if key != summary["species"]:
+                other += [local_name(self.cfg, key, lang), *species_words.get(key, [])]
+                if lang not in NON_LATIN:
+                    other += info.aliases
+        for key in self.cfg.sounds:
+            if key not in summary["sound_ids"]:
+                other += [sound_names.get(key) or self.cfg.sounds[key].get("label", key),
+                          *SOUND_WORDS.get(lang, {}).get(key, [])]
+        return AlertFacts(summary["animal_local"], summary["count"], summary["attempts"], summary["sounds_local"],
+                          summary["status_local"], summary["time"], other, NUMBER_WORDS.get(lang, {}),
+                          max_chars=2 * len(template), latin_allowed=lang not in NON_LATIN)
+
     def compose(self, summary: dict[str, Any]) -> tuple[str, str, str]:
-        """Returns (message, voice_text, source)."""
-        if self.client is not None:
-            res = self.client.generate_json(alert_prompt(summary, self.language), alert_schema())
-            if res.data and res.data.get("message"):
-                return str(res.data["message"]), str(res.data.get("voice_text") or res.data["message"]), "llm"
-        msg = template_message(summary, self.language)
-        return msg, msg, "template"
+        """Returns (message, voice_text, source). source is llm, template (no usable answer) or
+        template_ungrounded (the LLM answered and its facts were wrong)."""
+        template = template_message(summary, self.language)
+        if self.client is None:
+            return template, template, "template"
+        res = self.client.generate_json(alert_prompt(summary, self.language), alert_schema())
+        data = res.data or {}
+        message = str(data.get("message") or "").strip()
+        if not message:
+            log.warning("LLM alert unusable (%s); using the template", res.error or "empty message")
+            return template, template, "template"
+        facts = self._facts(summary, template)
+        problems = alert_problems(message, facts)
+        if problems:
+            log.warning("LLM alert rejected: %s | %s", "; ".join(problems), message[:300])
+            return template, template, "template_ungrounded"
+        voice = str(data.get("voice_text") or "").strip()
+        return message, voice if voice and not alert_problems(voice, facts) else message, "llm"
 
     def send(self, summary: dict[str, Any]) -> dict[str, Any]:
         return self.deliver(*self.compose(summary))

@@ -31,7 +31,7 @@ st.caption("Layer 1 sounds the alarm on every frame without any AI call. Layer 2
 with st.sidebar:
     st.header("Settings")
     provider = st.selectbox("GenAI provider", ["mock", "ollama", "gemini", "anthropic", "openai_compat"])
-    vlm_model = st.text_input("VLM model", "qwen2.5vl:7b" if provider == "ollama" else "")
+    vlm_model = st.text_input("VLM model", "qwen2.5vl:3b" if provider == "ollama" else "")
     policy = st.selectbox("Deterrent policy", ["llm", "bandit", "rule_chain", "random", "fixed"])
     language = st.selectbox("Farmer language", ["hi", "mr", "en"])
     use_demo = st.checkbox("Use synthetic demo video (no model weights needed)", value=True)

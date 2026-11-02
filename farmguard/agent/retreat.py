@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from farmguard.agent.clip_builder import sample_frames, to_jpeg
+from farmguard.agent.clip_builder import MAX_SIDE, sample_frames, to_jpeg
 from farmguard.agent.llm.base import LLMClient
 from farmguard.agent.prompts import SYSTEM_VISION, retreat_prompt, retreat_schema
 from farmguard.events import FramePacket, RetreatStatus
@@ -29,6 +29,7 @@ class RetreatResult:
     vlm_confidence: str | None
     frames_seen: int
     observation: str = ""
+    vlm_error: str | None = None
 
 
 def tracker_evidence(pkts: list[FramePacket], species: str, t0: float,
@@ -102,7 +103,7 @@ def fusion_errors(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 class RetreatChecker:
     def __init__(self, buffer: FrameBuffer, client: LLMClient | None, observe_seconds: float = 12,
                  gone_frames: int = 15, use_vlm: bool = True, n_vlm_frames: int = 4,
-                 max_side: int = 640):
+                 max_side: int = MAX_SIDE):
         self.buffer = buffer
         self.client = client
         self.observe_seconds = observe_seconds
@@ -116,7 +117,7 @@ class RetreatChecker:
         self.buffer.wait_until(t_end, timeout_s=self.observe_seconds * 10 + 30)
         pkts = self.buffer.window(t_deterrent, t_end)
         tr_status, ttl = tracker_evidence(pkts, species, t_deterrent, self.gone_frames)
-        vlm_status, vlm_conf, obs = None, None, ""
+        vlm_status, vlm_conf, obs, vlm_error = None, None, "", None
         if self.use_vlm and pkts:
             chosen = sample_frames(pkts, self.n_vlm_frames, last_heavy=True)
             images = [to_jpeg(p.frame, self.max_side) for p in chosen]
@@ -129,7 +130,10 @@ class RetreatChecker:
                     vlm_status = RetreatStatus.UNCERTAIN
                 vlm_conf = res.data.get("confidence")
                 obs = str(res.data.get("observation", ""))[:300]
+            else:
+                vlm_error = res.error or "empty answer"
+                log.warning("VLM retreat check failed (%s); using tracker evidence only", vlm_error[:300])
         status = fuse(tr_status, vlm_status, vlm_conf)
         if status != RetreatStatus.GONE:
             ttl = None if status != RetreatStatus.LEAVING else ttl
-        return RetreatResult(status, ttl, tr_status, vlm_status, vlm_conf, len(pkts), obs)
+        return RetreatResult(status, ttl, tr_status, vlm_status, vlm_conf, len(pkts), obs, vlm_error)

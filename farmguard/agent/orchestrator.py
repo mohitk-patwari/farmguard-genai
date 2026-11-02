@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from farmguard.agent.clip_builder import build_event_images
+from farmguard.agent.clip_builder import MAX_IMAGES, MAX_SIDE, build_event_images
 from farmguard.agent.memory import Memory, hour_bucket
 from farmguard.agent.notifier import Notifier
 from farmguard.agent.policy import LLMPolicy, Policy, PolicyContext
@@ -46,6 +46,7 @@ class AttemptLog:
     tracker_status: str
     vlm_status: str | None
     policy_latency_s: float = 0.0
+    vlm_error: str | None = None
 
 
 @dataclass
@@ -57,6 +58,7 @@ class EventResult:
     escalated: bool = False
     farmer: dict[str, Any] | None = None
     agent_seconds: float = 0.0
+    vlm_failed: bool = False
 
 
 class AgentWorker:
@@ -107,6 +109,13 @@ class AgentWorker:
             except Exception:
                 log.exception("Agent failed on event %s", ev.event_id)
 
+    def vlm_counts(self) -> dict[str, int]:
+        """For run results: a failed VLM call falls back quietly, so it has to be counted."""
+        attempts = [a for r in self.results for a in r.attempts]
+        return {"event_checks": len(self.results), "event_failed": sum(r.vlm_failed for r in self.results),
+                "retreat_checks": sum(a.vlm_status is not None or a.vlm_error is not None for a in attempts),
+                "retreat_failed": sum(a.vlm_error is not None for a in attempts)}
+
     # ---- one event ---------------------------------------------------------------------
     def _vlm_task(self, ev: IntrusionEvent) -> VLMReport | None:
         if self.vlm is None:
@@ -117,10 +126,12 @@ class AgentWorker:
         pkts = self.buffer.around(ev.video_time, before, after)
         trig = min(pkts, key=lambda p: abs(p.video_time - ev.video_time)) if pkts else None
         if trig is None:
+            log.warning("VLM check skipped for %s: no frames in the buffer", ev.event_id)
             return None
         images, layout = build_event_images(trig, pkts, ev.bbox,
                                             self.cfg.get("agent.clip.crop_padding", 0.25),
-                                            self.cfg.get("agent.clip.max_side", 768))
+                                            self.cfg.get("agent.clip.max_side", MAX_SIDE),
+                                            max_images=self.cfg.get("agent.clip.max_images", MAX_IMAGES))
         return self.vlm.check(images, layout, ev.species)
 
     def handle(self, ev: IntrusionEvent) -> EventResult:
@@ -180,7 +191,8 @@ class AgentWorker:
         farmer = self.notifier.send(summary)
         result = EventResult(event=ev.to_dict(), vlm=asdict(report) if report else None,
                              attempts=attempts, final_status=final, escalated=escalated,
-                             farmer=farmer, agent_seconds=time.perf_counter() - t_start)
+                             farmer=farmer, agent_seconds=time.perf_counter() - t_start,
+                             vlm_failed=self.vlm is not None and (report is None or report.error is not None))
         self.memory.add_event(event_id=ev.event_id, wall_time=ev.wall_time, video_time=ev.video_time,
                               species=ev.species, label=ev.label, zone=ev.zone,
                               track_id=ev.track_id,
@@ -221,7 +233,7 @@ class AgentWorker:
                  rr.vlm_status.value if rr.vlm_status else None)
         return AttemptLog(n, sound, source, reason, rr.status.value, rr.time_to_leave_s,
                           rr.tracker_status.value, rr.vlm_status.value if rr.vlm_status else None,
-                          latency)
+                          latency, rr.vlm_error)
 
     def _write_jsonl(self, res: EventResult) -> None:
         if not self._jsonl:

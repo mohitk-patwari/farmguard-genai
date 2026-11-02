@@ -221,7 +221,9 @@ def test_e5_single_file_mode_refuses_ambiguous_clips(tmp_path):
 
 # ------------------------------------------------------------------ E6
 def _alert(prompt, schema, n):
-    return {"message": "LLM alert " + str(len(prompt)), "voice_text": "v"}
+    f = json.loads(prompt[prompt.index("{"):prompt.rindex("}") + 1])  # echoes the facts, so it passes the grounding check
+    return {"message": " ".join([f["time"], f["animal"], str(f["count"]), *f["sounds_played"], f["result"]]),
+            "voice_text": "v"}
 
 
 def test_e6_sheet_is_blind_and_scoring_is_paired(tmp_path, results):

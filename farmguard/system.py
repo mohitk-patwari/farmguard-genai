@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from farmguard.agent.clip_builder import MAX_SIDE
 from farmguard.agent.llm.providers import build_client
 from farmguard.agent.memory import Memory
 from farmguard.agent.notifier import Notifier
@@ -58,7 +59,8 @@ def build_system(cfg: Config, detector: Detector | None = None, llm_client=None,
             vlm=VLMChecker(cfg, client),
             retreat=RetreatChecker(buffer, client, cfg.get("agent.retreat.observe_seconds", 12),
                                    cfg.get("agent.retreat.gone_frames", 15),
-                                   cfg.get("agent.retreat.use_vlm", True)),
+                                   cfg.get("agent.retreat.use_vlm", True),
+                                   max_side=cfg.get("agent.clip.max_side", MAX_SIDE)),
             policy=build_policy(cfg.get("agent.policy.type", "llm"), policy_client),
             notifier=Notifier(cfg, policy_client), on_result=on_result).start()
     fast = FastPath(cfg, detector or build_detector(cfg), zones, alarm, buffer,

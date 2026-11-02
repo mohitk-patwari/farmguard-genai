@@ -38,8 +38,9 @@ def _post_json(url: str, body: dict[str, Any], timeout: float,
 class OllamaClient(LLMClient):
     name = "ollama"
 
-    def __init__(self, model: str, host: str | None = None, **kw):
+    def __init__(self, model: str, host: str | None = None, num_ctx: int | None = None, **kw):
         super().__init__(model, **kw)
+        self.num_ctx = num_ctx
         self.host = (host or os.getenv("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
 
     def _call(self, prompt, schema, images, system):
@@ -51,9 +52,13 @@ class OllamaClient(LLMClient):
             user["images"] = [b64(i) for i in images]
         msgs.append(user)
         body: dict[str, Any] = {"model": self.model, "messages": msgs, "stream": False, "format": schema}
-        if self.temperature is not None:
-            body["options"] = {"temperature": self.temperature}
-        return _post_json(f"{self.host}/api/chat", body, self.timeout_s)["message"]["content"]
+        options = {"temperature": self.temperature, "num_ctx": self.num_ctx}
+        options = {k: v for k, v in options.items() if v is not None}
+        if options:
+            body["options"] = options
+        data = _post_json(f"{self.host}/api/chat", body, self.timeout_s)
+        log.info("ollama prompt_tokens=%s num_ctx=%s images=%d", data.get("prompt_eval_count"), self.num_ctx, len(images))
+        return data["message"]["content"]
 
 
 class GeminiClient(LLMClient):
@@ -90,7 +95,7 @@ class AnthropicClient(LLMClient):
     """No `temperature` (see module docstring): runs at the API default whatever settings.yaml says."""
     name = "anthropic"
 
-    def __init__(self, model: str = "claude-opus-5-5", **kw):
+    def __init__(self, model: str = "claude-haiku-5-5", **kw):
         super().__init__(model, **kw)
         import anthropic  # pip install anthropic
         self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"),
@@ -190,7 +195,7 @@ def build_client(cfg, role: str = "vlm") -> LLMClient:
           "max_retries": cfg.get("agent.max_retries", 2), "backoff_base_s": cfg.get("agent.backoff_base_s", 1.0),
           "max_total_s": cfg.get("agent.max_total_s", 180)}
     if provider == "ollama":
-        return OllamaClient(model, **kw)
+        return OllamaClient(model, num_ctx=cfg.get("agent.ollama.num_ctx"), **kw)
     if provider == "gemini":
         return GeminiClient(model, **kw)
     if provider == "anthropic":
