@@ -45,7 +45,9 @@ def test_prompt_matches_situation_and_is_compact_json():
     policy.decide(_ctx(tried=()))
     policy.decide(_ctx(tried=("a",)))
     first, retry = client.calls[0]["prompt"], client.calls[1]["prompt"]
-    assert "No animal is in the field now" in first and "did not make it leave" in retry
+    assert "next time this species enters" in first and "animal is in" not in first
+    assert "just played" in retry
+    assert "habituate" not in first and "decisively" not in retry
     assert '"attempt":2' in retry and "location" not in retry.lower()
 
 

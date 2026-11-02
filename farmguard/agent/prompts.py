@@ -124,18 +124,17 @@ def policy_schema(allowed_actions: list[str]) -> dict[str, Any]:
 
 def policy_prompt(context: dict[str, Any]) -> str:
     import json
-    # attempt 1 is the cached first alarm for the species' next visit (nothing has failed yet)
-    situation = ("No animal is in the field now. Choose the first sound to play the next time this "
-                 "species enters the field." if context["attempt"] == 1 else
-                 "An animal is in the crop field and the previous deterrent did not make it leave.")
+    # attempt 1 is the cached first alarm for the species' next visit (nothing has failed yet).
+    # E4 fairness: no claims about how animals respond (habituation, behaviour). The simulator models
+    # those, so stating them would hand the LLM the world's structure, which the bandit doesn't get.
+    situation = ("Choose the first sound to play the next time this species enters the field."
+                 if context["attempt"] == 1 else
+                 "A deterrent was just played and the animal has not been seen leaving the crop field.")
     return "\n".join([
         situation,
         "Choose the next action. Guidelines:",
-        ("- Animals habituate: avoid sounds that were just tried in this event and sounds that "
-         "recently failed for this species at this time of day."),
         ("- Prefer sounds with a high past success rate for this species, but sometimes try a "
          "less-used sound when the evidence is thin (few trials)."),
-        "- If the animal is eating, act decisively; if it is already leaving, a milder sound is fine.",
         "- Choose 'escalate_farmer' only if no allowed sound is likely to work.",
         "- Sounds in on_cooldown or tried_this_event will be rejected.",
         "- success_rate is null for a sound with no trials; recent is newest first.",
@@ -205,10 +204,14 @@ def nightly_summary_prompt(facts: dict[str, Any], language: str) -> str:
 def alert_prompt(summary: dict[str, Any], language: str) -> str:
     import json
     lang = LANG_NAMES.get(language, language)
+    facts = {"animal": summary["animal_local"], "count": summary["count"], "time": summary["time"],
+             "sounds_played": summary["sounds_local"], "result": summary["status_local"]}
     return "\n".join([
         f"Write an alert for a farmer in {lang}. Use very simple words a farmer would use.",
         "Facts (use ONLY these, do not add anything):",
-        json.dumps(summary, ensure_ascii=False, indent=1),
+        json.dumps(facts, ensure_ascii=False, indent=1),
+        ("Copy animal, every sound in sounds_played and result into the message word for word. Write "
+         "count in digits if it is above 1. Name no other animal, sound or number."),
         ("message: at most 3 short sentences: what animal came and when, what sounds were played, "
          "and whether it left. If it did not leave, ask the farmer to check the field."),
         "voice_text: the same content as one or two sentences, for text-to-speech.",
