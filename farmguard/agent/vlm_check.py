@@ -53,6 +53,7 @@ class VLMChecker:
         res = self.client.generate_json(prompt, vlm_schema(self.species_keys), refs + images, SYSTEM_VISION)
         if res.data is None:
             # Fallback: trust the detector so the pipeline keeps going (reliability requirement)
+            log.warning("VLM check failed (%s); using the detector label %s", (res.error or "")[:300], detector_species)
             return VLMReport(species=detector_species or "unclassifiable", count=1,
                              behaviour="unclear", confidence="low", observation="",
                              note="VLM unavailable; using detector label", raw=res.raw,

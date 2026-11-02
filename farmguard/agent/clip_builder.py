@@ -11,8 +11,12 @@ import numpy as np
 
 from farmguard.events import FramePacket
 
+# Qwen2.5-VL's image tokens scale with pixels. 6 images at 768 px were ~6500 tokens against Ollama's 4096.
+MAX_SIDE = 448
+MAX_IMAGES = 4  # crop + full frame + 2 neighbours
 
-def to_jpeg(img: np.ndarray, max_side: int = 768, quality: int = 85) -> bytes:
+
+def to_jpeg(img: np.ndarray, max_side: int = MAX_SIDE, quality: int = 85) -> bytes:
     h, w = img.shape[:2]
     s = max_side / max(h, w)
     if s < 1:
@@ -57,8 +61,8 @@ def frame_with_box(frame: np.ndarray, xyxy) -> np.ndarray:
 
 
 def build_event_images(trigger_pkt: FramePacket, neighbours: list[FramePacket], bbox,
-                       padding: float = 0.25, max_side: int = 768,
-                       mode: str = "crop+full+burst") -> tuple[list[bytes], str]:
+                       padding: float = 0.25, max_side: int = MAX_SIDE,
+                       mode: str = "crop+full+burst", max_images: int = MAX_IMAGES) -> tuple[list[bytes], str]:
     """mode: crop | full | crop+full | crop+full+burst  (E2 ablation). Returns (jpegs, layout)."""
     images: list[bytes] = []
     layout: list[str] = []
@@ -70,6 +74,7 @@ def build_event_images(trigger_pkt: FramePacket, neighbours: list[FramePacket], 
         layout.append("the full frame with the animal boxed in red")
     if "burst" in mode:
         others = [p for p in neighbours if p.index != trigger_pkt.index]
+        others = sample_frames(others, max(0, max_images - len(images)), last_heavy=False)
         for p in others:
             images.append(to_jpeg(p.frame, max_side))
         if others:

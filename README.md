@@ -32,7 +32,7 @@ Tested on Windows 11 with Windows PowerShell 5.1 and Python 3.12. Use Python 3.1
 
 ## With real models
 ```bash
-ollama pull qwen2.5vl:7b                     # free local VLM
+ollama pull qwen2.5vl:3b                     # free local VLM (7b on Colab: needs more than 6 GB VRAM)
 python -m farmguard.cli draw-zone data/clips/my_farm.mp4
 python -m farmguard.cli run --source data/clips/my_farm.mp4 --provider ollama --language hi
 # cloud alternatives: --provider gemini | anthropic | openai_compat  (keys in .env)

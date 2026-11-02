@@ -42,6 +42,7 @@ def cmd_run(args) -> None:
     run_video(system, src.frames(), realtime=not args.fast, max_frames=args.max_frames)
     src.release()
     print(json.dumps({"events": len(system.fast.events),
+                      "vlm": system.agent.vlm_counts() if system.agent else None,
                       "stage_timing_ms": system.fast.timer.summary(),
                       "results": [{"event": r.event["event_id"], "final": r.final_status,
                                    "sounds": [a.sound for a in r.attempts],
