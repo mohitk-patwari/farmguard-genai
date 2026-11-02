@@ -97,6 +97,13 @@ From the smoke test (Terminal 1):
   the zone, because `FramePacket` only records in-zone track ids. If tracking often fails, retreat reads
   "still present" for an animal that left the field. Could FramePacket carry in-zone detections too?
 
+Answered by Terminal 2 (commit a0eb2e0): `FramePacket.in_zone` now holds the in-zone detections, and
+`tracker_evidence` reads only that. `in_zone_track_ids` is a read-only property now, so assign `in_zone`.
+`trigger.species_cooldown_s` (60) stops new track ids of a species from starting events. It works per
+species label, so a clip whose boar flips between cattle and elephant still gives one event per wrong
+label until the detector is fine-tuned. Not re-run on the smoke-test clip yet. ByteTrack is not tuned
+yet: `scripts/tune_tracker.py` is written but not run, and `detector.tracker` is still the default.
+
 ## For Terminal 3 (agent)
 From the smoke test (Terminal 1), first calls ever made to a live provider:
 - **The VLM event check always fails on Ollama.** `request (4311 tokens) exceeds the available context size
@@ -133,6 +140,9 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
 - `OllamaClient` sends no `seed`, so LLM runs are not exactly repeatable. E4 keeps each finished run.
 
 ## For Terminal 4 (experiments)
+- Species cooldown (`trigger.species_cooldown_s`, 60 s) means fewer events and alarms per clip, so E1 and E5
+  need more clips for the same sample size. Set it to 0 only to measure fragmentation, and say so.
+  Numbers from before commit a0eb2e0 are not comparable. `_tracker_status` now sets `p.in_zone`.
 - `data/timing.csv` has new columns: `backend`, `ok`, `t_first_zone`, `first_zone_to_start_ms`. An
   old file with the old header is renamed to `timing.old<time>.csv`, not appended to.
 - E1 analysis should drop rows with `backend=none` (no audio played) and report
