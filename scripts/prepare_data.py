@@ -34,6 +34,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -232,6 +233,57 @@ def fetch_inat(per_class: int, seed: int = 0) -> None:
     _write_manifest(src, _download_all(rows, src))
 
 
+MD_ANIMAL = "1"  # MegaDetector batch format: 1 animal, 2 person, 3 vehicle
+
+
+def iter_json_array(text_stream, key: str, chunk_chars: int = 1 << 20):
+    """Yield the items of the array `"key": [...]` from a huge JSON file, holding about one chunk in
+    memory. json.load on these files needs many GB, which is what ran the laptop out of RAM.
+    ponytail: finds the key by text, so it assumes no earlier string or nested object uses the same
+    `"key": [`, and that items are objects (a bare number could be cut at a chunk edge). True for COCO
+    camera-trap metadata and MegaDetector results."""
+    decoder = json.JSONDecoder()
+    start = re.compile('"' + re.escape(key) + r'"\s*:\s*\[')
+    buf = ""
+    while True:
+        m = start.search(buf)
+        if m:
+            buf = buf[m.end():]
+            break
+        more = text_stream.read(chunk_chars)
+        if not more:
+            raise KeyError(key)
+        buf = buf[-len(key) - 16:] + more  # keep a tail: the key may straddle two chunks
+    pos, eof = 0, False
+    while True:
+        while pos < len(buf) and buf[pos] in " \t\r\n,":
+            pos += 1
+        if pos < len(buf):
+            if buf[pos] == "]":
+                return
+            try:
+                item, pos = decoder.raw_decode(buf, pos)
+            except json.JSONDecodeError:
+                if eof:
+                    raise
+            else:
+                yield item
+                continue
+        if eof and pos >= len(buf):
+            raise ValueError(f"unterminated array {key}")
+        buf = buf[pos:]
+        pos = 0
+        more = text_stream.read(chunk_chars)
+        eof = not more
+        buf += more
+
+
+def stream_zipped_json_array(path: Path, key: str):
+    """iter_json_array over the first file in a zip, decompressing as it reads."""
+    with zipfile.ZipFile(path) as z, z.open(z.namelist()[0]) as raw:
+        yield from iter_json_array(io.TextIOWrapper(raw, encoding="utf-8"), key)
+
+
 def fetch_lila(per_class: int, seed: int = 0) -> None:
     """NACTI camera traps (CDLA-permissive): real night IR frames. Species labels are human; boxes
     come from LILA's MegaDetector v5a results, so label_source says so. Split by camera location."""
@@ -242,42 +294,52 @@ def fetch_lila(per_class: int, seed: int = 0) -> None:
     _download((f"{base}/nacti_metadata.1.14.json.zip", meta_zip))
     _download((("https://lila.science/public/lila-md-results/"
                "nacti_mdv5a.0.0_results.filtered_rde_0.150_0.850_50_0.200.json.zip"), md_zip))
-    with zipfile.ZipFile(meta_zip) as z, z.open(z.namelist()[0]) as fh:
-        meta = json.load(fh)
-    cats = {c["id"]: c["name"].lower() for c in meta["categories"]}
+    def meta(key: str):
+        return stream_zipped_json_array(meta_zip, key)
+
+    cats = {c["id"]: c["name"].lower() for c in meta("categories")}
     log.info("NACTI categories with pig/cow names: %s",
              [n for n in cats.values() if re.search("pig|boar|sus|cow|cattle|bos", n)])
     wanted = {i: ("boar" if re.search("pig|boar|sus scrofa", n) else "cattle")
               for i, n in cats.items() if re.search(r"wild pig|boar|sus scrofa|cattle|bos taurus|domestic cow", n)}
-    images = {im["id"]: im for im in meta["images"]}
-    by_file = {}
-    per_image_cat: dict = {}
-    for ann in meta["annotations"]:
-        per_image_cat.setdefault(ann["image_id"], set()).add(ann["category_id"])
-    for iid, cs in per_image_cat.items():
-        if len(cs) == 1 and (c := next(iter(cs))) in wanted:
-            by_file[images[iid]["file_name"]] = (wanted[c], images[iid])
-    del meta, images, per_image_cat
-    with zipfile.ZipFile(md_zip) as z, z.open(z.namelist()[0]) as fh:
-        md = json.load(fh)
-    animal = next(k for k, v in md["detection_categories"].items() if v == "animal")
+    # Keep 1 image id in 4 by hash: enough to choose from, and this dict stays small on a 16 GB laptop.
+    image_cat = {a["image_id"]: a["category_id"] for a in meta("annotations")
+                 if a["category_id"] in wanted and zlib.crc32(str(a["image_id"]).encode()) % 4 == 0}
+    for a in meta("annotations"):  # second pass: drop images that also show another species
+        if a["image_id"] in image_cat and a["category_id"] != image_cat[a["image_id"]]:
+            del image_cat[a["image_id"]]
+    by_file = {im["file_name"]: (wanted[image_cat[im["id"]]], im.get("location") or im.get("seq_id"))
+               for im in meta("images") if im["id"] in image_cat}
+    del image_cat
+    log.info("NACTI candidates: %d", len(by_file))
+    rng = random.Random(seed)
     pools: dict[str, list[dict]] = {c: [] for c in ("boar", "cattle")}
-    for im in md["images"]:
+    seen_pool = {c: 0 for c in pools}
+    pool_cap = per_class * 20
+    for im in stream_zipped_json_array(md_zip, "images"):
         hit = by_file.get(im.get("file"))
         if not hit:
             continue
-        cls, info = hit
-        dets = [d for d in im.get("detections") or []]
-        boxes = [d["bbox"] for d in dets if d["category"] == animal and d["conf"] >= 0.5]
+        cls, where = hit
+        dets = im.get("detections") or []
+        boxes = [d["bbox"] for d in dets if d["category"] == MD_ANIMAL and d["conf"] >= 0.5]
         # Reject images where MegaDetector is unsure or sees a person/vehicle: incomplete labels.
-        if not boxes or any(d["conf"] >= 0.2 and not (d["category"] == animal and d["conf"] >= 0.5) for d in dets):
+        if not boxes or any(d["conf"] >= 0.2 and not (d["category"] == MD_ANIMAL and d["conf"] >= 0.5) for d in dets):
             continue
-        pools[cls].append({
-            "image": im["file"], "cls": cls, "group": str(info.get("location") or info.get("seq_id") or im["file"]),
+        row = {
+            "image": im["file"], "cls": cls, "group": str(where or im["file"]),
             "boxes": [[x + w / 2, y + h / 2, w, h] for x, y, w, h in boxes],
             "label_source": "megadetector+human_species", "licence": "CDLA-Permissive", "author": "NACTI",
-            "url": f"https://storage.googleapis.com/public-datasets-lila/nacti-unzipped/{urllib.parse.quote(im['file'])}"})
-    rng = random.Random(seed)
+            "url": f"https://storage.googleapis.com/public-datasets-lila/nacti-unzipped/{urllib.parse.quote(im['file'])}"}
+        # Reservoir sample: the file is ordered by camera, so taking the first N would bias it.
+        seen_pool[cls] += 1
+        if len(pools[cls]) < pool_cap:
+            pools[cls].append(row)
+        elif (j := rng.randrange(seen_pool[cls])) < pool_cap:
+            pools[cls][j] = row
+    if not any(pools.values()):
+        raise RuntimeError("no NACTI image matched the MegaDetector results: check the file name format")
+    del by_file
     rows = []
     for cls, pool in pools.items():
         rng.shuffle(pool)

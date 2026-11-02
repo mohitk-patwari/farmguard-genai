@@ -149,7 +149,9 @@ def build_detector(cfg) -> Detector:
         model=cfg.path("detector.model"), classes=cfg.get("detector.classes"),
         open_vocabulary=cfg.get("detector.open_vocabulary", False),
         confidence=cfg.get("detector.confidence", 0.25), imgsz=cfg.get("detector.imgsz", 640),
-        device=cfg.get("detector.device", ""), tracker=cfg.get("detector.tracker", "bytetrack.yaml"),
+        device=cfg.get("detector.device", ""),
+        # A file in the repo wins; otherwise the name of a tracker bundled with ultralytics.
+        tracker=str(p) if (p := cfg.path("detector.tracker")).exists() else cfg.get("detector.tracker"),
         species_mapper=cfg.species_for_label, ignore_classes=cfg.get("detector.ignore_classes"),
         track_conf=cfg.get("detector.track_conf"), clahe=cfg.get("detector.clahe.enabled", False),
         clahe_clip_limit=cfg.get("detector.clahe.clip_limit", 2.0),

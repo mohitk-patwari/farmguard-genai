@@ -37,9 +37,7 @@ def tracker_evidence(pkts: list[FramePacket], species: str, t0: float,
     is inside the zone (track ids can change after occlusion, so species-level is safer)."""
     if not pkts:
         return RetreatStatus.UNCERTAIN, None
-    present = [any(d.species == species and d.track_id in p.in_zone_track_ids for d in p.detections)
-               or any(d.species == species and d.track_id is None for d in p.detections)
-               for p in pkts]
+    present = [any(d.species == species for d in p.in_zone) for p in pkts]
     # trailing absent streak
     streak = 0
     for flag in reversed(present):

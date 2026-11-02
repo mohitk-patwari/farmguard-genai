@@ -34,6 +34,28 @@ def test_night_flag():
     assert pd.is_night(ir) and pd.is_night(dark) and not pd.is_night(day)
 
 
+def test_json_array_stream_reads_any_chunk_size(tmp_path):
+    import io
+    import json
+    import zipfile
+    doc = {"info": {"note": "x" * 50}, "categories": [{"id": 1, "name": "a ] b"}],
+           "images": [{"id": i, "file": f"f{i}.jpg", "n": [1, {"k": "}"}]} for i in range(50)], "empty": []}
+    text = json.dumps(doc, indent=1)
+    for chunk in (1, 7, 64, 1 << 20):  # items and keys straddle chunks
+        assert list(pd.iter_json_array(io.StringIO(text), "images", chunk)) == doc["images"]
+        assert list(pd.iter_json_array(io.StringIO(text), "categories", chunk)) == doc["categories"]
+        assert list(pd.iter_json_array(io.StringIO(text), "empty", chunk)) == []
+    path = tmp_path / "m.json.zip"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("m.json", text)
+    assert [i["id"] for i in pd.stream_zipped_json_array(path, "images")] == list(range(50))
+    try:
+        list(pd.iter_json_array(io.StringIO(text), "missing", 16))
+    except KeyError:
+        return
+    raise AssertionError("missing key must raise")
+
+
 def test_box_conversion_and_clipping():
     assert pd.xyxy_to_xywhn(0, 0, 50, 100, 100, 100) == [.25, .5, .5, 1.0]
     assert pd.yolo_label_lines([[.5, .5, 1.2, -.1]], 2) == ["2 0.500000 0.500000 1.000000 0.000000"]

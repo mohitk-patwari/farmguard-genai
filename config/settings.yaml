@@ -37,6 +37,7 @@ trigger:
   window: 7                     # vote window (frames)
   min_hits: 4                   # animal must be in the zone in >= min_hits of the last `window` frames
   track_cooldown_s: 60          # same track cannot re-trigger the first alarm within this time
+  species_cooldown_s: 60        # a new track id of the same species cannot start an event within this time (T1 smoke test: 11 events from one 10 s clip)
   min_box_area_frac: 0.0005     # ignore tiny far-away boxes
 
 alarm:

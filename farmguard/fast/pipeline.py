@@ -43,7 +43,8 @@ class FastPath:
         self.latency_log = latency_log
         self.trigger = Trigger(window=cfg.get("trigger.window", 7),
                                min_hits=cfg.get("trigger.min_hits", 4),
-                               track_cooldown_s=cfg.get("trigger.track_cooldown_s", 60))
+                               track_cooldown_s=cfg.get("trigger.track_cooldown_s", 60),
+                               species_cooldown_s=cfg.get("trigger.species_cooldown_s", 60))
         self.motion = MotionGate(enabled=cfg.get("motion_gate.enabled", True),
                                  min_changed_fraction=cfg.get("motion_gate.min_changed_fraction", 0.002),
                                  warmup_frames=cfg.get("motion_gate.warmup_frames", 15))
@@ -128,8 +129,7 @@ class FastPath:
         self.timer.add("trigger", time.perf_counter() - t_det)
 
         pkt = FramePacket(index=idx, video_time=video_time, frame=frame, detections=dets,
-                          in_zone_track_ids={d.track_id for d, _ in in_zone if d.track_id is not None},
-                          t_read=t_read, t_detect_done=t_det)
+                          in_zone=[d for d, _ in in_zone], t_read=t_read, t_detect_done=t_det)
         self.buffer.push(pkt)
         if self.on_frame:
             self.on_frame(pkt, new_events)
@@ -160,7 +160,7 @@ def annotate(pkt: FramePacket, zones: ZoneSet | None) -> np.ndarray:
         zones.draw(img)
     for d in pkt.detections:
         x1, y1, x2, y2 = map(int, d.xyxy)
-        hot = d.track_id in pkt.in_zone_track_ids
+        hot = any(d is z for z in pkt.in_zone)
         color = (0, 0, 255) if hot else (0, 255, 0)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.putText(img, f"{d.label} #{d.track_id} {d.confidence:.2f}", (x1, max(15, y1 - 6)),

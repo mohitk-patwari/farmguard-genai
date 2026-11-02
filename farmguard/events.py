@@ -37,9 +37,13 @@ class FramePacket:
     video_time: float               # seconds since start of the video / stream
     frame: np.ndarray
     detections: list[Detection] = field(default_factory=list)
-    in_zone_track_ids: set[int] = field(default_factory=set)
+    in_zone: list[Detection] = field(default_factory=list)  # target animals inside the field
     t_read: float = 0.0
     t_detect_done: float = 0.0
+
+    @property
+    def in_zone_track_ids(self) -> set[int]:
+        return {d.track_id for d in self.in_zone if d.track_id is not None}
 
 
 @dataclass

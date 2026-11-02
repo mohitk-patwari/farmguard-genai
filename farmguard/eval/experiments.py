@@ -242,8 +242,7 @@ def _tracker_status(pkts: list[FramePacket], species: str, detector: Any, zones:
         h, w = p.frame.shape[:2]
         zs = zones.rescaled(w, h) if zones else ZoneSet.full_frame(w, h)
         p.detections = detector.detect(p.frame, i)
-        p.in_zone_track_ids = {d.track_id for d in p.detections
-                               if d.track_id is not None and zs.zone_of(d)}
+        p.in_zone = [d for d in p.detections if zs.zone_of(d)]
     return tracker_evidence(pkts, species, 0.0, gone_frames)[0].value
 
 

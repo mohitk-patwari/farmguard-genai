@@ -35,7 +35,8 @@ def train(args) -> None:
     from ultralytics import YOLO
     model = YOLO(str(ROOT / "weights" / "yolov8n.pt"))
     res = model.train(data=str(DATA / "data.yaml"), epochs=args.epochs, imgsz=640, batch=args.batch,
-                      patience=15, device=args.device, workers=4, seed=0, deterministic=True,
+                      # workers=2: each worker holds a full torch import, about 1 GB on Windows.
+                      patience=15, device=args.device, workers=2, seed=0, deterministic=True,
                       project=str(ROOT / "runs"), name="farmguard", exist_ok=True, plots=True)
     shutil.copy2(Path(res.save_dir) / "weights" / "best.pt", WEIGHTS)
     print(WEIGHTS)

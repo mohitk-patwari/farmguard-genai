@@ -4,6 +4,9 @@
   frames (subith2005 `app.py` 126-131 uses 4-of-7 majority; DMWeiy uses a 10-hit debounce).
 - Per-track cooldown (TETRA040 `_is_on_cooldown`, gotogrub `zone:species` cooldown key):
   a track fires the first alarm once; later retries are the agent's job.
+- Per-species cooldown: a fragmented track gets a new id, which is not a new animal. On the T1 smoke
+  test one 10 s boar clip made 11 events this way. A second animal of the same species arriving within
+  the cooldown does not get its own event either; the agent is already deterring that species.
 - Untracked detections fall back to a per-species key.
 Pure logic, no I/O: easy to unit-test.
 """
@@ -25,15 +28,17 @@ class TriggerHit:
 
 class Trigger:
     def __init__(self, window: int = 7, min_hits: int = 4, track_cooldown_s: float = 60.0,
-                 min_box_area: float = 0.0):
+                 min_box_area: float = 0.0, species_cooldown_s: float = 0.0):
         if min_hits > window:
             raise ValueError("min_hits must be <= window")
         self.window = window
         self.min_hits = min_hits
         self.cooldown = track_cooldown_s
+        self.species_cooldown = species_cooldown_s
         self.min_box_area = min_box_area
         self._votes: dict[str, deque[bool]] = defaultdict(lambda: deque(maxlen=window))
         self._last_fired: dict[str, float] = {}
+        self._species_last_fired: dict[str | None, float] = {}
         self._first_stamp: dict[str, float] = {}
 
     @staticmethod
@@ -60,9 +65,16 @@ class Trigger:
             votes = self._votes[key]
             if sum(votes) >= self.min_hits:
                 last = self._last_fired.get(key)
-                if last is None or video_time - last >= self.cooldown:
+                last_species = self._species_last_fired.get(det.species)
+                if ((last is None or video_time - last >= self.cooldown)
+                        and (last_species is None or video_time - last_species >= self.species_cooldown)):
                     self._last_fired[key] = video_time
+                    self._species_last_fired[det.species] = video_time
                     hits.append(TriggerHit(det, zone, key, self._first_stamp[key]))
+                else:
+                    # Waiting out a cooldown is not voting delay: without this, an alarm when the
+                    # cooldown ends would log first_zone_to_start_ms of about 60 s in E1.
+                    self._first_stamp[key] = stamp
         for key in list(self._votes):  # a frame without the animal in the zone is a "no" vote
             if key not in in_zone_keys:
                 self._votes[key].append(False)

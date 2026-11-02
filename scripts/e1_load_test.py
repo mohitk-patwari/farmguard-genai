@@ -119,7 +119,8 @@ def run_arm(name: str, args, agent_on: bool) -> dict:
     t_start = time.perf_counter()
     for rep in range(args.repeats):
         fast.trigger = Trigger(window=cfg.get("trigger.window"), min_hits=cfg.get("trigger.min_hits"),
-                               track_cooldown_s=cfg.get("trigger.track_cooldown_s"))
+                               track_cooldown_s=cfg.get("trigger.track_cooldown_s"),
+                               species_cooldown_s=cfg.get("trigger.species_cooldown_s"))
         src = VideoSource(args.clip, live=True, target_fps=cfg.get("video.target_fps", 10),
                           resize_width=cfg.get("video.resize_width", 960))
         last = 0.0

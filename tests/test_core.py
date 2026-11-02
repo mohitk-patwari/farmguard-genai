@@ -65,7 +65,7 @@ def _pkts(flags, species="wild_boar"):
     out = []
     for i, f in enumerate(flags):
         dets = [Detection((0, 0, 10, 10), 0.9, "wild boar", species, 1)] if f else []
-        out.append(FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), dets, {1} if f else set()))
+        out.append(FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), dets, list(dets)))
     return out
 
 
@@ -74,6 +74,49 @@ def test_tracker_evidence():
     assert st == RetreatStatus.GONE and ttl == 3.0
     st, _ = tracker_evidence(_pkts([1] * 8), "wild_boar", 0.0, gone_frames=5)
     assert st == RetreatStatus.STILL_PRESENT
+
+
+def test_tracker_evidence_ignores_out_of_zone_detections():
+    """T1's question: an untracked box outside the field must not read as "still present"."""
+    outside = [Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", None)]
+    pkts = [FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), outside, []) for i in range(8)]
+    assert tracker_evidence(pkts, "wild_boar", 0.0, gone_frames=5)[0] == RetreatStatus.GONE
+    inside = [FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), outside, outside) for i in range(8)]
+    assert tracker_evidence(inside, "wild_boar", 0.0, gone_frames=5)[0] == RetreatStatus.STILL_PRESENT
+
+
+def test_trigger_species_cooldown_stops_fragmented_tracks():
+    tr = Trigger(window=7, min_hits=4, track_cooldown_s=60, species_cooldown_s=60)
+    fired = []
+    for t in range(40):  # a new track id every 5 frames, as on the smoke-test clip
+        d = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", t // 5)
+        fired += [(t, h.detection.track_id) for h in tr.update([(d, "field")], {f"track:{t // 5}"}, float(t))]
+    assert fired == [(3, 0)]
+    d = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", 99)
+    late = [tr.update([(d, "field")], {"track:99"}, float(t)) for t in range(60, 64)]
+    assert [bool(x) for x in late] == [False, False, False, True]  # cooldown over: a new event
+
+
+def test_trigger_species_cooldown_is_per_species():
+    tr = Trigger(window=3, min_hits=1, species_cooldown_s=60)
+    boar = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", 1)
+    boar2 = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", 2)
+    monkey = Detection((0, 0, 10, 10), 0.9, "monkey", "monkey", 3)
+    hits = tr.update([(boar, "f"), (boar2, "f"), (monkey, "f")], set(), 0.0)
+    assert [h.detection.track_id for h in hits] == [1, 3]  # two boars in one frame: one event
+
+
+def test_trigger_cooldown_wait_is_not_counted_as_vote_delay():
+    tr = Trigger(window=7, min_hits=2, track_cooldown_s=0, species_cooldown_s=10)
+    a = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", 1)
+    b = Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", 2)
+    tr.update([(a, "f")], set(), 0.0, stamp=0.0)
+    tr.update([(a, "f")], set(), 1.0, stamp=1.0)  # a fires; b waits out the species cooldown below
+    hits = []
+    for t in range(2, 13):
+        hits += tr.update([(b, "f")], set(), float(t), stamp=float(t))
+    (hit,) = hits
+    assert hit.detection.track_id == 2 and hit.first_stamp >= 10.0
 
 
 def test_fuse_prefers_vlm_when_tracker_loses_animal():
