@@ -118,6 +118,8 @@ def test_llm_runs_resume_from_cache_and_key_on_scenario(cfg, sim, tmp_path):
     first = run_all(cfg, sim, ["llm"], client, cache_dir=tmp_path)
     n = len(client.calls)
     assert run_all(cfg, sim, ["llm"], client, cache_dir=tmp_path) == first and len(client.calls) == n
+    logged = next(tmp_path.rglob("*.decisions.jsonl")).read_text(encoding="utf-8").splitlines()
+    assert len(logged) == sum(o.llm_calls for o in first) == n
     sim["habituation"]["strength"] = 0.6
     run_all(cfg, sim, ["llm"], client, cache_dir=tmp_path)
     assert len(client.calls) > n

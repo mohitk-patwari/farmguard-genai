@@ -313,9 +313,12 @@ def run_all(cfg: Config, sim: dict[str, Any], policies: list[str], llm_client=No
                     outcomes += [SimOutcome(**o) for o in json.loads(cached.read_text(encoding="utf-8"))]
                     continue
             pol = build_policy(name, llm_client, seed=seed)
+            if cached is not None:  # raw answers and per-call latency, for audit and invalid-action counts
+                cached.parent.mkdir(parents=True, exist_ok=True)
+                pol.decision_log = cached.with_suffix(".decisions.jsonl")
+                pol.decision_log.unlink(missing_ok=True)  # left by an interrupted run
             res = run_policy(cfg, sim, pol, events, world_seed=seed + 1, outcome_seed=seed + 2, run=r)
             if cached is not None:
-                cached.parent.mkdir(parents=True, exist_ok=True)
                 cached.write_text(json.dumps([asdict(o) for o in res]), encoding="utf-8")
             outcomes += res
     return outcomes

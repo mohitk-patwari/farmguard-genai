@@ -46,7 +46,8 @@ def _headline(exp: str, out: dict[str, Any]) -> str:
     if exp == "e4":
         return f"SIMULATED, {out['sim_config']['effectiveness']['mode']}: " + " ".join(
                         f"{p}: {s['success_rate']:.3f} succ, {s['mean_time_in_field_s']:.0f}s"
-                        + (f", fallback {s['llm_fallback_rate']:.1%}" if p == "llm" else "") + ";"
+                        + (f", fallback {s['llm_fallback_rate']:.1%}, invalid {s['invalid_action_rate']:.1%}"
+                           if p == "llm" else "") + ";"
                         for p, s in out["summary"].items())
     if exp == "e4-grid":
         return f"{out['cells']} cells x {len(out['policies'])} policies x {out['repeats']} repeats: see e4_grid.csv"
@@ -109,8 +110,12 @@ def main(argv: list[str] | None = None) -> dict[str, Any] | str:
     p.add_argument("--n", type=int, default=20, help="E6: cases per language")
     p.add_argument("--ratings", nargs="*", default=[], help="E6 filled sheets, one per rater")
     p.add_argument("--no-log", action="store_true", help="do not append to paper/RESULTS.md")
+    p.add_argument("--results-dir", help="write here instead of results/, e.g. for a timing probe "
+                                         "that must not replace the numbers the paper's figures read")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.results_dir:
+        E.RESULTS = Path(args.results_dir)
 
     ov: dict[str, Any] = {}
     if args.provider:
