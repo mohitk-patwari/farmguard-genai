@@ -70,9 +70,9 @@ def _pkts(flags, species="wild_boar"):
 
 
 def test_tracker_evidence():
-    st, ttl = tracker_evidence(_pkts([1, 1, 1, 0, 0, 0, 0, 0]), "wild_boar", 0.0, gone_frames=5)
+    st, ttl = tracker_evidence(_pkts([1, 1, 1, 0, 0, 0, 0, 0]), 0.0, gone_frames=5)
     assert st == RetreatStatus.GONE and ttl == 3.0
-    st, _ = tracker_evidence(_pkts([1] * 8), "wild_boar", 0.0, gone_frames=5)
+    st, _ = tracker_evidence(_pkts([1] * 8), 0.0, gone_frames=5)
     assert st == RetreatStatus.STILL_PRESENT
 
 
@@ -80,9 +80,17 @@ def test_tracker_evidence_ignores_out_of_zone_detections():
     """T1's question: an untracked box outside the field must not read as "still present"."""
     outside = [Detection((0, 0, 10, 10), 0.9, "wild boar", "wild_boar", None)]
     pkts = [FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), outside, []) for i in range(8)]
-    assert tracker_evidence(pkts, "wild_boar", 0.0, gone_frames=5)[0] == RetreatStatus.GONE
+    assert tracker_evidence(pkts, 0.0, gone_frames=5)[0] == RetreatStatus.GONE
     inside = [FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), outside, outside) for i in range(8)]
-    assert tracker_evidence(inside, "wild_boar", 0.0, gone_frames=5)[0] == RetreatStatus.STILL_PRESENT
+    assert tracker_evidence(inside, 0.0, gone_frames=5)[0] == RetreatStatus.STILL_PRESENT
+
+
+def test_tracker_evidence_counts_any_target_animal_in_the_zone():
+    """Detector labels are unreliable (T1's boars came out as cattle): any target animal counts."""
+    assert tracker_evidence(_pkts([1] * 8, species="stray_cattle"), 0.0, gone_frames=5)[0] == RetreatStatus.STILL_PRESENT
+    person = [Detection((0, 0, 10, 10), 0.9, "person", None, 1)]  # not a target species
+    pkts = [FramePacket(i, float(i), np.zeros((2, 2, 3), np.uint8), person, person) for i in range(8)]
+    assert tracker_evidence(pkts, 0.0, gone_frames=5)[0] == RetreatStatus.GONE
 
 
 def test_trigger_species_cooldown_stops_fragmented_tracks():

@@ -38,9 +38,11 @@ def _post_json(url: str, body: dict[str, Any], timeout: float,
 class OllamaClient(LLMClient):
     name = "ollama"
 
-    def __init__(self, model: str, host: str | None = None, num_ctx: int | None = None, **kw):
+    def __init__(self, model: str, host: str | None = None, num_ctx: int | None = None,
+                 seed: int | None = None, **kw):
         super().__init__(model, **kw)
         self.num_ctx = num_ctx
+        self.seed = seed  # same model, prompt, temperature and seed: Ollama repeats its answer
         self.host = (host or os.getenv("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
 
     def _call(self, prompt, schema, images, system):
@@ -52,7 +54,7 @@ class OllamaClient(LLMClient):
             user["images"] = [b64(i) for i in images]
         msgs.append(user)
         body: dict[str, Any] = {"model": self.model, "messages": msgs, "stream": False, "format": schema}
-        options = {"temperature": self.temperature, "num_ctx": self.num_ctx}
+        options = {"temperature": self.temperature, "seed": self.seed, "num_ctx": self.num_ctx}
         options = {k: v for k, v in options.items() if v is not None}
         if options:
             body["options"] = options
@@ -195,7 +197,7 @@ def build_client(cfg, role: str = "vlm") -> LLMClient:
           "max_retries": cfg.get("agent.max_retries", 2), "backoff_base_s": cfg.get("agent.backoff_base_s", 1.0),
           "max_total_s": cfg.get("agent.max_total_s", 180)}
     if provider == "ollama":
-        return OllamaClient(model, num_ctx=cfg.get("agent.ollama.num_ctx"), **kw)
+        return OllamaClient(model, num_ctx=cfg.get("agent.ollama.num_ctx"), seed=cfg.get("agent.seed", 42), **kw)
     if provider == "gemini":
         return GeminiClient(model, **kw)
     if provider == "anthropic":

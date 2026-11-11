@@ -2,7 +2,7 @@
 
 This is the step NO reviewed system implements for real (AEGISFARM `services/observation.py`
 returns a hard-coded "retreated"). We fuse two signals and keep both for experiment E3:
-  - tracker evidence: frames after the sound in which the species is still inside the zone
+  - tracker evidence: frames after the sound in which any target animal is still inside the zone
   - VLM evidence: a few frames from the window, last-heavy, judged gone/leaving/still_present
 """
 from __future__ import annotations
@@ -32,13 +32,14 @@ class RetreatResult:
     vlm_error: str | None = None
 
 
-def tracker_evidence(pkts: list[FramePacket], species: str, t0: float,
+def tracker_evidence(pkts: list[FramePacket], t0: float,
                      gone_frames: int) -> tuple[RetreatStatus, float | None]:
-    """Pure function, unit-tested. A frame counts as 'present' if any detection of the species
-    is inside the zone (track ids can change after occlusion, so species-level is safer)."""
+    """Pure function, unit-tested. A frame counts as 'present' if any target-animal detection
+    (mapped to a species) is inside the zone, whatever its label: track ids change after
+    occlusion, and on T1's boar clip the detector called the same boars cattle and elephant."""
     if not pkts:
         return RetreatStatus.UNCERTAIN, None
-    present = [any(d.species == species for d in p.in_zone) for p in pkts]
+    present = [any(d.species for d in p.in_zone) for p in pkts]
     # trailing absent streak
     streak = 0
     for flag in reversed(present):
@@ -112,11 +113,11 @@ class RetreatChecker:
         self.n_vlm_frames = n_vlm_frames
         self.max_side = max_side
 
-    def check(self, species: str, species_label: str, t_deterrent: float) -> RetreatResult:
+    def check(self, species_label: str, t_deterrent: float) -> RetreatResult:
         t_end = t_deterrent + self.observe_seconds
         self.buffer.wait_until(t_end, timeout_s=self.observe_seconds * 10 + 30)
         pkts = self.buffer.window(t_deterrent, t_end)
-        tr_status, ttl = tracker_evidence(pkts, species, t_deterrent, self.gone_frames)
+        tr_status, ttl = tracker_evidence(pkts, t_deterrent, self.gone_frames)
         vlm_status, vlm_conf, obs, vlm_error = None, None, "", None
         if self.use_vlm and pkts:
             chosen = sample_frames(pkts, self.n_vlm_frames, last_heavy=True)

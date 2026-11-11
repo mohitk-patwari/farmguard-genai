@@ -66,9 +66,11 @@ class Memory:
                  source, reason, status, success, time_to_leave, tracker_status, vlm_status))
             self.conn.commit()
 
-    def sound_stats(self, species: str, bucket: str | None = None,
-                    recent_n: int = 5) -> dict[str, dict[str, Any]]:
-        """Per sound: trials, successes, success_rate, recent outcomes (newest first)."""
+    def sound_stats(self, species: str, bucket: str | None = None, recent_n: int = 5,
+                    window: int = 20) -> dict[str, dict[str, Any]]:
+        """Per sound: trials, successes, success_rate, recent outcomes (newest first), and
+        window_trials / window_successes counted over only the newest `window` attempts of this
+        species (x bucket), all sounds together (bandit_sw; agent.policy.bandit_window)."""
         q = "SELECT sound, success, time_to_leave FROM attempts WHERE species=?"
         args: list[Any] = [species]
         if bucket:
@@ -78,10 +80,14 @@ class Memory:
         with self._lock:
             rows = self.conn.execute(q, args).fetchall()
         stats: dict[str, dict[str, Any]] = {}
-        for r in rows:
-            s = stats.setdefault(r["sound"], {"trials": 0, "successes": 0, "recent": []})
+        for i, r in enumerate(rows):
+            s = stats.setdefault(r["sound"], {"trials": 0, "successes": 0, "recent": [],
+                                              "window_trials": 0, "window_successes": 0})
             s["trials"] += 1
             s["successes"] += r["success"]
+            if i < window:
+                s["window_trials"] += 1
+                s["window_successes"] += r["success"]
             if len(s["recent"]) < recent_n:
                 s["recent"].append("ok" if r["success"] else "fail")
         for s in stats.values():

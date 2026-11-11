@@ -6,6 +6,8 @@
   rule_chain  - fixed escalation chain A -> B -> C -> farmer (AEGISFARM `response_engine.py`)
   bandit      - Thompson sampling over past outcomes per species x time bucket (strong
                 non-GenAI learner; the LLM must be compared against this, not only weak baselines)
+  bandit_sw   - the same over only the last N outcomes of that species x bucket (sliding window),
+                so it can follow habituation, which a stationary bandit can't (T4's E4 note)
   llm         - LLM with an enum-constrained action, given behaviour from the VLM, attempts so far
                 and outcome memory; falls back to bandit on any failure.
 All policies see the same PolicyContext and go through validators.validate().
@@ -22,7 +24,7 @@ from typing import Any
 
 from farmguard.agent.llm.base import LLMClient
 from farmguard.agent.prompts import SYSTEM_POLICY, policy_prompt, policy_schema
-from farmguard.agent.validators import ESCALATE, ValidationContext, on_cooldown, validate
+from farmguard.agent.validators import ESCALATE, ValidationContext, legal_actions, on_cooldown, validate
 from farmguard.events import PolicyDecision
 
 log = logging.getLogger(__name__)
@@ -45,11 +47,13 @@ class PolicyContext:
     now: float = 0.0
     sound_cooldown_s: float = 20.0
     event_id: str = ""
+    immediate_escalation_species: tuple[str, ...] = ("elephant",)  # agent.policy.immediate_escalation_species
 
     def validation(self) -> ValidationContext:
         return ValidationContext(self.allowed, self.tried_this_event, self.attempt_no,
                                  self.max_attempts, self.last_played_at, self.now,
-                                 self.sound_cooldown_s)
+                                 self.sound_cooldown_s,
+                                 self.species in self.immediate_escalation_species)
 
 
 class Policy:
@@ -108,20 +112,30 @@ class BanditPolicy(Policy):
     def __init__(self, seed: int | None = None):
         self.rng = random.Random(seed)
 
+    def counts(self, st: dict[str, Any]) -> tuple[int, int]:
+        return st.get("successes", 0), st.get("trials", 0)
+
     def propose(self, ctx):
-        best, best_v = None, -1.0
+        best, best_v, best_c = None, -1.0, (0, 0)
         for s in ctx.allowed:
             if s in ctx.tried_this_event:
                 continue
-            st = ctx.stats.get(s, {})
-            succ, trials = st.get("successes", 0), st.get("trials", 0)
+            succ, trials = self.counts(ctx.stats.get(s, {}))
             v = self.rng.betavariate(1 + succ, 1 + trials - succ)
             if v > best_v:
-                best, best_v = s, v
+                best, best_v, best_c = s, v, (succ, trials)
         if best is None:
             return ESCALATE, "no untried sound left", 1.0
-        st = ctx.stats.get(best, {})
-        return best, f"Thompson sample {best_v:.2f} (succ {st.get('successes', 0)}/{st.get('trials', 0)})", best_v
+        return best, f"Thompson sample {best_v:.2f} (succ {best_c[0]}/{best_c[1]})", best_v
+
+
+class SlidingWindowBanditPolicy(BanditPolicy):
+    """Thompson sampling over the window_* counts from Memory.sound_stats(window=N): the newest N
+    outcomes of this species x time bucket, all sounds together. Older outcomes are forgotten."""
+    name = "bandit_sw"
+
+    def counts(self, st):
+        return st.get("window_successes", 0), st.get("window_trials", 0)
 
 
 class LLMPolicy(Policy):
@@ -129,11 +143,17 @@ class LLMPolicy(Policy):
     name = "llm"
 
     def __init__(self, client: LLMClient, fallback: Policy | None = None,
-                 decision_log: str | Path | None = None):
+                 decision_log: str | Path | None = None, constrain_enum: bool = True):
         self.client = client
         self.fallback = fallback or BanditPolicy()
+        # True: the schema enum holds only legal actions (validators.legal_actions), so a tried or
+        # cooling-down sound can't be chosen. False: every allowed sound + escalate, as in T4's probe.
+        self.constrain_enum = constrain_enum
         self.decision_log = Path(decision_log) if decision_log else None  # JSONL, one line per decision
         self._trace: dict[str, Any] = {}
+
+    def enum(self, ctx: PolicyContext) -> list[str]:
+        return legal_actions(ctx.validation()) if self.constrain_enum else ctx.allowed + [ESCALATE]
 
     def context_json(self, ctx: PolicyContext) -> dict[str, Any]:
         """Same keys every time, and every allowed sound always listed in the same order, so a
@@ -145,7 +165,7 @@ class LLMPolicy(Policy):
             "attempt": ctx.attempt_no + 1, "max_attempts": ctx.max_attempts,
             "tried_this_event": ctx.tried_this_event,
             "on_cooldown": [s for s in ctx.allowed if on_cooldown(s, v)],
-            "allowed_actions": ctx.allowed + [ESCALATE],
+            "allowed_actions": self.enum(ctx),
             "history": {s: {"trials": ctx.stats.get(s, {}).get("trials", 0),
                             "success_rate": ctx.stats.get(s, {}).get("success_rate"),
                             "recent": ctx.stats.get(s, {}).get("recent", [])}
@@ -153,12 +173,15 @@ class LLMPolicy(Policy):
         }
 
     def propose(self, ctx):
-        allowed = ctx.allowed + [ESCALATE]
+        allowed = self.enum(ctx)
         prompt = policy_prompt(self.context_json(ctx))
         res = self.client.generate_json(prompt, policy_schema(allowed), None, SYSTEM_POLICY)
         proposed = (res.data or {}).get("action")
         in_enum = proposed in allowed
-        self._trace = {"provider": self.client.name, "model": res.model, "system": SYSTEM_POLICY, "prompt": prompt,
+        self._trace = {"provider": self.client.name, "model": res.model,
+                       "seed": getattr(self.client, "seed", None),  # only Ollama sends one
+                       "constrain_enum": self.constrain_enum, "enum": allowed,
+                       "system": SYSTEM_POLICY, "prompt": prompt,
                        "raw_response": res.raw, "llm_error": res.error, "llm_latency_s": res.latency_s,
                        "proposed": proposed, "llm_failed": res.data is None,
                        "out_of_enum": res.data is not None and not in_enum}
@@ -174,6 +197,8 @@ class LLMPolicy(Policy):
     def decide(self, ctx):
         if ctx.attempt_no >= ctx.max_attempts:  # the validator would force this: don't spend a call
             return PolicyDecision(ESCALATE, f"max_attempts={ctx.max_attempts} reached", 1.0, self.name)
+        if self.constrain_enum and self.enum(ctx) == [ESCALATE]:  # nothing to choose: no call either
+            return PolicyDecision(ESCALATE, "no legal sound left", 1.0, self.name)
         d = super().decide(ctx)
         t = self._trace
         used_fallback = t["llm_failed"] or t["out_of_enum"]
@@ -214,7 +239,9 @@ def decision_log_summary(path: str | Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = None) -> Policy:
+def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = None,
+                 cfg: Any = None) -> Policy:
+    """cfg (a Config) only supplies agent.policy.constrain_enum; without it the default (true) holds."""
     if kind == "fixed":
         return FixedPolicy()
     if kind == "random":
@@ -223,8 +250,11 @@ def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = 
         return RuleChainPolicy()
     if kind == "bandit":
         return BanditPolicy(seed)
+    if kind == "bandit_sw":
+        return SlidingWindowBanditPolicy(seed)
     if kind == "llm":
         if client is None:
             raise ValueError("llm policy needs an LLM client")
-        return LLMPolicy(client, BanditPolicy(seed))
+        constrain = cfg.get("agent.policy.constrain_enum", True) if cfg is not None else True
+        return LLMPolicy(client, BanditPolicy(seed), constrain_enum=bool(constrain))
     raise ValueError(f"unknown policy {kind}")

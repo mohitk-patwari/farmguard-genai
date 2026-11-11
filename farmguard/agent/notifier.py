@@ -88,6 +88,13 @@ def template_message(summary: dict[str, Any], language: str) -> str:
     return msg
 
 
+FALSE_ALARM_NOTES = {  # fixed text, no LLM: there is nothing to report but a doubt
+    "hi": "कम ज़रूरी: {time} बजे कैमरे ने {animal} पहचाना, पर जाँच में कोई जानवर नहीं दिखा। शायद गलत चेतावनी थी।",
+    "mr": "कमी महत्त्वाचे: {time} वाजता कॅमेऱ्याने {animal} ओळखले, पण तपासणीत कोणताही प्राणी दिसला नाही. कदाचित चुकीचा इशारा होता.",
+    "en": "Low priority: at {time} the camera flagged a {animal}, but the check saw no animal. Probably a false alarm.",
+}
+
+
 def local_name(cfg: Config, species: str, language: str) -> str:
     info = cfg.species.get(species)
     names = {"hi": info.hindi, "mr": info.marathi} if info else {}
@@ -154,6 +161,11 @@ class Notifier:
             return template, template, "template_ungrounded"
         voice = str(data.get("voice_text") or "").strip()
         return message, voice if voice and not alert_problems(voice, facts) else message, "llm"
+
+    def false_alarm_note(self, species: str, wall_time: float) -> str:
+        animal = local_name(self.cfg, species, self.language) if self.language in NON_LATIN else species.replace("_", " ")
+        return FALSE_ALARM_NOTES.get(self.language, FALSE_ALARM_NOTES["en"]).format(
+            time=time.strftime("%H:%M", time.localtime(wall_time)), animal=animal)
 
     def send(self, summary: dict[str, Any]) -> dict[str, Any]:
         return self.deliver(*self.compose(summary))

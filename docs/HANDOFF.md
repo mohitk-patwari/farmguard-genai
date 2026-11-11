@@ -27,6 +27,8 @@ Recorded 2026-11-02 on the lead laptop (Windows 11, 16 GB RAM, RTX 3050 6 GB, dr
 - Agent, 2026-11-03: fixes for the smoke test below (images, `num_ctx`, alert grounding, 3b default, policy
   prompt). Unit-tested only. **The re-run did not happen:** it hit the 4 GB free-RAM limit 8 s in (started at
   4339 MB; T1's 3b run started near 7 GB). So the VLM success rate after these fixes is still unknown.
+- Agent, 2026-11-11: constrained policy enum, VLM species override and possible-false-alarm note, no farmer
+  escalation before attempt 2 (except elephant), `bandit_sw`, Ollama seed. Unit-tested only; no model was run.
 - Integration, 2026-11-02 (branch `main`). Merged vision, agent, experiments; only HANDOFF.md conflicted.
   `LatencyLog.save()` (vision) emptied the rows `e1_run` reads (experiments), so E1 reported 0 alarms: fixed
   in `fast/timing.py`. Added `--mute` / `FARMGUARD_MUTE=1`, `lap`, and the bake step in setup.
@@ -187,5 +189,27 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
 - E4: `LLMPolicy.source` is now `llm_fallback_bandit` when the LLM failed, so count those apart from `llm`. To
   measure invalid actions in the simulator, set `pol.decision_log = ...` on the policy in `run_all`, then call
   `policy.decision_log_summary(path)`. `invalid_action_rate` includes in-enum picks the validator changed.
-  The first-sound prompt now says no animal is present, which changes LLM runs compared with older logs.
+  (The first-sound prompt no longer says no animal is present: that line was removed on 2026-11-03.)
 - Cost per event is not logged yet (`llm_call` has latency only). Tell Terminal 3 if the paper needs token counts.
+- **From 2026-11-11, ready for E4:** E4 LLM runs from before this commit are not comparable (enum, escalation
+  rule and seed changed; the decision-code hash in `_llm_run_path` changes too, so cached runs are not reused).
+  - `agent.policy.constrain_enum: true` (default): the enum holds only legal actions (allowed, not tried this
+    event, not on cooldown, plus `escalate_farmer` when allowed). `false` gives the old enum, to reproduce your
+    3b probe. Decision records log `constrain_enum`, `enum`, `seed` and `model`. With `true`, a tried sound that a
+    schema-ignoring client still returns counts as `out_of_enum` and goes to the bandit fallback, so report
+    `invalid_action_rate` for both modes, not only `true` (the schema makes it near 0 by construction).
+  - `run_all` now calls `build_policy(..., cfg=cfg)` so the flag reaches the simulator, and `_llm_run_path` adds
+    `constrain_enum` and the client's seed to the cache key, so a `false` run never reuses a `true` run's file.
+  - `bandit_sw`: Thompson sampling over the newest `agent.policy.bandit_window` (20) outcomes of the species x
+    time bucket, all sounds together. Use it by name. The window comes from `Memory.sound_stats(window=)`, and the
+    simulator calls that with the default 20: pass `window=` there if you vary it. I added `bandit_sw` to the
+    adaptive-first-sound list in `run_policy` (one-word edit in your file).
+  - Escalation: the validator turns `escalate_farmer` before attempt 2 into the first legal sound (counted as
+    invalid) unless the species is in `agent.policy.immediate_escalation_species` (`[elephant]`) or no legal sound
+    is left. This applies to every policy, so early escalations fall for all of them.
+  - `tracker_evidence(pkts, t0, gone_frames)` lost its species argument: any target animal in the zone counts.
+    I updated the call in `_tracker_status` (its `species` parameter is now unused).
+- From 2026-11-11, E5 and live runs: `agent.vlm.override_species: true` and `override_min_confidence: high`.
+  events.jsonl and `farmguard run` results log `detector_species, vlm_species, vlm_confidence, effective_species,
+  overridden, possible_false_alarm`. A VLM "none" at high confidence with no animal in the retreat check stops the
+  sounds, sends a fixed low-priority note (source `false_alarm_note`) and records no outcome in memory.

@@ -61,13 +61,15 @@ def test_full_prompt_and_response_are_logged(tmp_path):
     assert r["model"] == "mock" and r["provider"] == "mock" and "llm_latency_s" in r
 
 
-@pytest.mark.parametrize("action,out_of_enum,changed", [
-    ("b", False, False),
-    ("a", False, True),                  # in the enum, but already failed in this event
-    ("ultrasonic_25khz", True, False),   # outside the enum: never reaches the validator or the speaker
+@pytest.mark.parametrize("action,constrain,out_of_enum,changed", [
+    ("b", True, False, False),
+    ("a", False, False, True),           # old enum: in it, but already failed in this event
+    ("a", True, True, False),            # constrained enum: a tried sound is outside it
+    ("ultrasonic_25khz", True, True, False),   # outside the enum: never reaches the validator or the speaker
 ])
-def test_invalid_actions_are_measured_before_the_validator(tmp_path, action, out_of_enum, changed):
+def test_invalid_actions_are_measured_before_the_validator(tmp_path, action, constrain, out_of_enum, changed):
     policy, path = _policy(tmp_path, action)
+    policy.constrain_enum = constrain
     d = policy.decide(_ctx())
     r = json.loads(path.read_text(encoding="utf-8"))
     assert r["proposed"] == action and r["out_of_enum"] is out_of_enum and r["validator_changed"] is changed

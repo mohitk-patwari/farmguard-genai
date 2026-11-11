@@ -54,6 +54,7 @@ agent:
     gemini: {vlm: "gemini-3.8-flash", llm: "gemini-3.8-flash"}
     anthropic: {vlm: "claude-haiku-5-5", llm: "claude-haiku-5-5"}   # opt-in, cheapest model
     # openai_compat: {vlm: "...", llm: "..."}   # depends on the server
+  seed: 42                      # sent to Ollama with temperature, so a rerun repeats its answers; logged per decision
   temperature: 0.2              # null = don't send. Anthropic always runs at default sampling (400 on API version 2026-10-21): state it in E2
   ollama:
     num_ctx: 4096               # sent per call. 8192 took free RAM to 1.5 GB on the laptop. 3b prompts must fit: see clip.max_side, clip.max_images
@@ -72,12 +73,20 @@ agent:
     dir: "data/fewshot"         # <dir>/<species key, none or other_animal>/*.jpg
     per_species: 3              # 3-5; about 21 images per call at 3 (5 species + none + other_animal), so expect slower calls
     max_side: 384
+  vlm:
+    override_species: true      # a confident VLM species replaces the detector's for sounds, policy, alert, memory.
+                                # T1's boar clip: detector said stray_cattle / elephant on every event. false = detector only
+    override_min_confidence: "high"   # high | medium | low. Also: VLM "none" at high = possible false alarm (quiet note)
   retreat:
     observe_seconds: 12         # how long after a deterrent we watch
     gone_frames: 15             # consecutive frames with no animal in zone = gone (tracker evidence)
     use_vlm: true
   policy:
-    type: "llm"                 # llm | fixed | random | rule_chain | bandit
+    type: "llm"                 # llm | fixed | random | rule_chain | bandit | bandit_sw
+    constrain_enum: true        # enum = legal actions only (untried, off cooldown). false = old enum: reproduces T4's
+                                # probe (21.7% of 3b answers picked a sound that already failed)
+    immediate_escalation_species: ["elephant"]   # may go to the farmer before attempt 2 (danger to people)
+    bandit_window: 20           # bandit_sw: Thompson sampling over the newest N outcomes per species x time bucket
     max_attempts: 3             # after this many failed deterrents, escalate to the farmer
     sound_cooldown_s: 20
     decision_log: "data/policy_decisions.jsonl"   # full prompt + response per LLM decision (paper examples, invalid-action rate)

@@ -59,6 +59,15 @@ class EventResult:
     farmer: dict[str, Any] | None = None
     agent_seconds: float = 0.0
     vlm_failed: bool = False
+    detector_species: str = ""
+    vlm_species: str | None = None
+    vlm_confidence: str | None = None
+    effective_species: str = ""          # what sounds, policy, alert and memory used
+    overridden: bool = False             # a confident VLM species replaced the detector's
+    possible_false_alarm: bool = False   # the VLM saw no animal, with high confidence
+
+
+CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
 class AgentWorker:
@@ -114,7 +123,23 @@ class AgentWorker:
         attempts = [a for r in self.results for a in r.attempts]
         return {"event_checks": len(self.results), "event_failed": sum(r.vlm_failed for r in self.results),
                 "retreat_checks": sum(a.vlm_status is not None or a.vlm_error is not None for a in attempts),
-                "retreat_failed": sum(a.vlm_error is not None for a in attempts)}
+                "retreat_failed": sum(a.vlm_error is not None for a in attempts),
+                "species_overridden": sum(r.overridden for r in self.results),
+                "possible_false_alarm": sum(r.possible_false_alarm for r in self.results)}
+
+    def effective_species(self, detector: str, report: VLMReport | None) -> tuple[str, bool, bool]:
+        """(species, overridden, possible_false_alarm). The detector's label was wrong on every event of
+        T1's boar clip, so a confident VLM answer wins (agent.vlm.override_*). A failed VLM call,
+        'unclassifiable', 'other_animal' or a doubtful answer keeps the detector's label."""
+        if report is None or report.error or not self.cfg.get("agent.vlm.override_species", True):
+            return detector, False, False
+        if report.species == "none" and report.confidence == "high":
+            return detector, False, True
+        need = CONF_RANK.get(str(self.cfg.get("agent.vlm.override_min_confidence", "high")), 2)
+        if (report.species in self.cfg.species and report.species != detector
+                and CONF_RANK.get(report.confidence, -1) >= need):
+            return report.species, True, False
+        return detector, False, False
 
     # ---- one event ---------------------------------------------------------------------
     def _vlm_task(self, ev: IntrusionEvent) -> VLMReport | None:
@@ -136,8 +161,6 @@ class AgentWorker:
 
     def handle(self, ev: IntrusionEvent) -> EventResult:
         t_start = time.perf_counter()
-        info = self.cfg.species[ev.species]
-        label = ev.species.replace("_", " ")
         max_attempts = self.cfg.get("agent.policy.max_attempts", 3)
         bucket = hour_bucket(ev.wall_time)
         vlm_future = self._pool.submit(self._vlm_task, ev)
@@ -145,9 +168,7 @@ class AgentWorker:
         tried: list[str] = [ev.first_sound]
         self._last_played[ev.first_sound] = ev.video_time
         attempts: list[AttemptLog] = []
-        rr = self.retreat.check(ev.species, label, ev.video_time)
-        attempts.append(self._log_attempt(ev, 1, ev.first_sound, "fast_path_default",
-                                          "first alarm (no GenAI in the alarm path)", rr, bucket))
+        rr = self.retreat.check(ev.species.replace("_", " "), ev.video_time)
 
         report: VLMReport | None = None
         try:
@@ -157,19 +178,32 @@ class AgentWorker:
             log.warning("VLM check failed: %s", exc)
         behaviour = report.behaviour if report else "unclear"
         count = report.count if report else 1
+        species, overridden, false_alarm = self.effective_species(ev.species, report)
+        if overridden:
+            log.info("Event %s: VLM says %s (%s), detector said %s: using %s", ev.event_id,
+                     species, report.confidence, ev.species, species)
+        info = self.cfg.species[species]
+        label = species.replace("_", " ")
+        # VLM saw no animal and neither does the retreat check: stop, and record nothing in outcome
+        # memory (a sound "working" on an empty field is false evidence)
+        quiet = false_alarm and RetreatStatus.STILL_PRESENT not in (rr.tracker_status, rr.vlm_status)
+        attempts.append(self._log_attempt(ev, species, 1, ev.first_sound, "fast_path_default",
+                                          "first alarm (no GenAI in the alarm path)", rr, bucket,
+                                          remember=not quiet))
 
         status = rr.status
         escalated = False
-        while status not in (RetreatStatus.GONE, RetreatStatus.LEAVING):
+        while not quiet and status not in (RetreatStatus.GONE, RetreatStatus.LEAVING):
             now = self.buffer.latest_time
-            ctx = PolicyContext(species=ev.species, species_label=label, allowed=info.allowed_sounds,
+            ctx = PolicyContext(species=species, species_label=label, allowed=info.allowed_sounds,
                                 default_sound=info.default_sound, tried_this_event=list(tried),
                                 attempt_no=len(tried), max_attempts=max_attempts, hour_bucket=bucket,
                                 behaviour=behaviour, count=count,
-                                stats=self.memory.sound_stats(ev.species, bucket),
+                                stats=self._stats(species, bucket),
                                 last_played_at=dict(self._last_played), now=now,
                                 sound_cooldown_s=self.cfg.get("agent.policy.sound_cooldown_s", 20),
-                                event_id=ev.event_id)
+                                event_id=ev.event_id,
+                                immediate_escalation_species=self._immediate())
             decision: PolicyDecision = self.policy.decide(ctx)
             if decision.action == ESCALATE:
                 escalated = True
@@ -179,55 +213,72 @@ class AgentWorker:
             self.alarm.play(decision.action, reason=f"agent:{decision.source}", event_id=ev.event_id)
             self._last_played[decision.action] = t_play
             tried.append(decision.action)
-            rr = self.retreat.check(ev.species, label, t_play)
-            attempts.append(self._log_attempt(ev, len(tried), decision.action, decision.source,
+            rr = self.retreat.check(label, t_play)
+            attempts.append(self._log_attempt(ev, species, len(tried), decision.action, decision.source,
                                               decision.reason, rr, bucket, decision.latency_s))
             status = rr.status
 
         final = status.value
-        summary = self.notifier.build_summary(ev.species, ev.wall_time,
-                                              [a.sound for a in attempts], final, len(attempts),
-                                              count, behaviour)
-        farmer = self.notifier.send(summary)
+        if quiet:
+            note = self.notifier.false_alarm_note(species, ev.wall_time)
+            farmer = self.notifier.deliver(note, note, "false_alarm_note")
+        else:
+            farmer = self.notifier.send(self.notifier.build_summary(
+                species, ev.wall_time, [a.sound for a in attempts], final, len(attempts), count, behaviour))
         result = EventResult(event=ev.to_dict(), vlm=asdict(report) if report else None,
                              attempts=attempts, final_status=final, escalated=escalated,
                              farmer=farmer, agent_seconds=time.perf_counter() - t_start,
-                             vlm_failed=self.vlm is not None and (report is None or report.error is not None))
+                             vlm_failed=self.vlm is not None and (report is None or report.error is not None),
+                             detector_species=ev.species, vlm_species=report.species if report else None,
+                             vlm_confidence=report.confidence if report else None,
+                             effective_species=species, overridden=overridden,
+                             possible_false_alarm=false_alarm)
         self.memory.add_event(event_id=ev.event_id, wall_time=ev.wall_time, video_time=ev.video_time,
-                              species=ev.species, label=ev.label, zone=ev.zone,
+                              species=species, label=ev.label, zone=ev.zone,
                               track_id=ev.track_id,
                               vlm_species=report.species if report else None,
                               vlm_behaviour=behaviour,
                               vlm_confidence=report.confidence if report else None,
                               final_status=final, attempts=len(attempts), escalated=int(escalated),
                               farmer_message=farmer["message"],
-                              extra={"vlm_note": report.note if report else None})
+                              extra={"vlm_note": report.note if report else None,
+                                     "detector_species": ev.species, "overridden": overridden,
+                                     "possible_false_alarm": false_alarm})
         self._write_jsonl(result)
-        self._update_first_sound(ev, bucket, max_attempts)
+        if not quiet:
+            self._update_first_sound(ev, species, bucket, max_attempts)
         return result
 
-    def _update_first_sound(self, ev: IntrusionEvent, bucket: str, max_attempts: int) -> None:
+    def _stats(self, species: str, bucket: str) -> dict[str, dict[str, Any]]:
+        return self.memory.sound_stats(species, bucket, window=self.cfg.get("agent.policy.bandit_window", 20))
+
+    def _immediate(self) -> tuple[str, ...]:
+        return tuple(self.cfg.get("agent.policy.immediate_escalation_species", ["elephant"]) or ())
+
+    def _update_first_sound(self, ev: IntrusionEvent, species: str, bucket: str, max_attempts: int) -> None:
         """Off the critical path: pick the first sound for this species' NEXT visit."""
-        if self.first_sound_cache is None or self.policy.name not in ("llm", "bandit", "random"):
+        if self.first_sound_cache is None or self.policy.name not in ("llm", "bandit", "bandit_sw", "random"):
             return
-        info = self.cfg.species[ev.species]
-        ctx = PolicyContext(species=ev.species, species_label=ev.species.replace("_", " "),
+        info = self.cfg.species[species]
+        ctx = PolicyContext(species=species, species_label=species.replace("_", " "),
                             allowed=info.allowed_sounds, default_sound=info.default_sound,
                             tried_this_event=[], attempt_no=0, max_attempts=max_attempts,
-                            hour_bucket=bucket, stats=self.memory.sound_stats(ev.species, bucket),
-                            sound_cooldown_s=0, event_id=ev.event_id)
+                            hour_bucket=bucket, stats=self._stats(species, bucket),
+                            sound_cooldown_s=0, event_id=ev.event_id,
+                            immediate_escalation_species=self._immediate())
         try:
             rec = self.policy.decide(ctx).action
             if rec in info.allowed_sounds:
-                self.first_sound_cache[ev.species] = rec
+                self.first_sound_cache[species] = rec
         except Exception:
             log.exception("first-sound update failed")
 
-    def _log_attempt(self, ev: IntrusionEvent, n: int, sound: str, source: str, reason: str,
-                     rr: RetreatResult, bucket: str, latency: float = 0.0) -> AttemptLog:
-        self.memory.add_attempt(ev.event_id, n, ev.species, sound, source, reason, rr.status.value,
-                                rr.time_to_leave_s, rr.tracker_status.value,
-                                rr.vlm_status.value if rr.vlm_status else None, bucket=bucket)
+    def _log_attempt(self, ev: IntrusionEvent, species: str, n: int, sound: str, source: str, reason: str,
+                     rr: RetreatResult, bucket: str, latency: float = 0.0, remember: bool = True) -> AttemptLog:
+        if remember:
+            self.memory.add_attempt(ev.event_id, n, species, sound, source, reason, rr.status.value,
+                                    rr.time_to_leave_s, rr.tracker_status.value,
+                                    rr.vlm_status.value if rr.vlm_status else None, bucket=bucket)
         log.info("Event %s attempt %d: %s -> %s (tracker=%s vlm=%s)", ev.event_id, n, sound,
                  rr.status.value, rr.tracker_status.value,
                  rr.vlm_status.value if rr.vlm_status else None)

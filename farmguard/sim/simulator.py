@@ -209,7 +209,7 @@ def run_policy(cfg: Config, sim: dict[str, Any], policy: Policy, events: list[Si
                 elapsed += tm["farmer_arrival_s"]
                 break
             sounds.append(d.action)
-        if adaptive_first and policy.name in ("bandit", "llm", "random"):
+        if adaptive_first and policy.name in ("bandit", "bandit_sw", "llm", "random"):
             ctx0 = PolicyContext(species=ev.species, species_label=ev.species.replace("_", " "),
                                  allowed=info.allowed_sounds, default_sound=info.default_sound,
                                  tried_this_event=[], attempt_no=0, max_attempts=tm["max_attempts"],
@@ -289,10 +289,12 @@ _DECISION_CODE = ["farmguard/sim/simulator.py", "farmguard/agent/policy.py", "fa
                   "farmguard/agent/validators.py", "farmguard/agent/memory.py", "config/species.yaml"]
 
 
-def _llm_run_path(cache_dir: Path, sim: dict[str, Any], client: Any, run: int) -> Path:
+def _llm_run_path(cache_dir: Path, sim: dict[str, Any], client: Any, run: int,
+                  constrain_enum: bool = True) -> Path:
     h = hashlib.sha1(json.dumps({k: v for k, v in sim.items() if k != "sensitivity"},
                                 sort_keys=True).encode())
-    h.update(f"{client.name}:{client.model}:{client.temperature}".encode())
+    h.update(f"{client.name}:{client.model}:{client.temperature}:{getattr(client, 'seed', None)}".encode())
+    h.update(f"constrain_enum={bool(constrain_enum)}".encode())
     for rel in _DECISION_CODE:
         h.update((ROOT / rel).read_bytes().replace(b"\r\n", b"\n"))
     return cache_dir / h.hexdigest()[:16] / f"llm_r{run}.json"
@@ -308,11 +310,12 @@ def run_all(cfg: Config, sim: dict[str, Any], policies: list[str], llm_client=No
         for name in policies:
             cached = None
             if name == "llm" and cache_dir is not None:
-                cached = _llm_run_path(Path(cache_dir), sim, llm_client, r)
+                cached = _llm_run_path(Path(cache_dir), sim, llm_client, r,
+                                       cfg.get("agent.policy.constrain_enum", True))
                 if cached.exists():
                     outcomes += [SimOutcome(**o) for o in json.loads(cached.read_text(encoding="utf-8"))]
                     continue
-            pol = build_policy(name, llm_client, seed=seed)
+            pol = build_policy(name, llm_client, seed=seed, cfg=cfg)
             if cached is not None:  # raw answers and per-call latency, for audit and invalid-action counts
                 cached.parent.mkdir(parents=True, exist_ok=True)
                 pol.decision_log = cached.with_suffix(".decisions.jsonl")

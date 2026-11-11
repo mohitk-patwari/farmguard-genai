@@ -18,30 +18,54 @@ class ValidationContext:
     last_played_at: dict[str, float] = field(default_factory=dict)  # sound -> video time
     now: float = 0.0
     sound_cooldown_s: float = 20.0
+    immediate_escalation: bool = False  # species may go to the farmer before attempt 2 (elephant)
+
+
+# T4's E4 probe: 15.6% of LLM events went to the farmer after one sound. Two deterrents first.
+MIN_ATTEMPTS_BEFORE_ESCALATION = 2
 
 
 def on_cooldown(sound: str, ctx: ValidationContext) -> bool:
     return ctx.now - ctx.last_played_at.get(sound, -1e9) < ctx.sound_cooldown_s
 
 
+def legal_sounds(ctx: ValidationContext) -> list[str]:
+    return [s for s in ctx.allowed if s not in ctx.tried_this_event and not on_cooldown(s, ctx)]
+
+
+def escalation_allowed(ctx: ValidationContext, sounds: list[str] | None = None) -> bool:
+    sounds = legal_sounds(ctx) if sounds is None else sounds
+    return ctx.attempt_no >= MIN_ATTEMPTS_BEFORE_ESCALATION or ctx.immediate_escalation or not sounds
+
+
+def legal_actions(ctx: ValidationContext) -> list[str]:
+    """What validate() would pass unchanged. The constrained policy enum (agent.policy.constrain_enum)."""
+    if ctx.attempt_no >= ctx.max_attempts:
+        return [ESCALATE]
+    sounds = legal_sounds(ctx)
+    return sounds + ([ESCALATE] if escalation_allowed(ctx, sounds) else [])
+
+
 def validate(action: str, ctx: ValidationContext) -> tuple[str, list[str]]:
-    """Returns (final_action, warnings). Never raises."""
+    """Returns (final_action, warnings). Never raises. A replaced action becomes the first legal
+    sound in species.yaml order (or escalate_farmer if none is left)."""
     warnings: list[str] = []
     if ctx.attempt_no >= ctx.max_attempts:
         return ESCALATE, [f"max_attempts={ctx.max_attempts} reached"]
+    candidates = legal_sounds(ctx)
     if action == ESCALATE:
-        return ESCALATE, warnings
-    candidates = [s for s in ctx.allowed if s not in ctx.tried_this_event and not on_cooldown(s, ctx)]
+        if escalation_allowed(ctx, candidates):
+            return ESCALATE, warnings
+        return candidates[0], [f"'{ESCALATE}' before attempt {MIN_ATTEMPTS_BEFORE_ESCALATION}"]
     if action not in ctx.allowed:
         warnings.append(f"'{action}' not in allowed list")
-        action = candidates[0] if candidates else ESCALATE
     elif action in ctx.tried_this_event:
         warnings.append(f"'{action}' already failed in this event")
-        action = candidates[0] if candidates else ESCALATE
     elif on_cooldown(action, ctx):
         warnings.append(f"'{action}' on cooldown")
-        action = candidates[0] if candidates else ESCALATE
-    return action, warnings
+    else:
+        return action, warnings
+    return (candidates[0] if candidates else ESCALATE), warnings
 
 
 @dataclass
