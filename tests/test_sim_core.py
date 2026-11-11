@@ -125,6 +125,13 @@ def test_llm_runs_resume_from_cache_and_key_on_scenario(cfg, sim, tmp_path):
     assert len(client.calls) > n
 
 
+def test_unknown_policy_fails_before_any_llm_call(cfg, sim):
+    client = MockClient()
+    with pytest.raises(ValueError):
+        run_all(cfg, sim, ["llm", "no_such_policy"], client)
+    assert client.calls == []
+
+
 def test_learning_curve_covers_all_nights(cfg, sim):
     rows = learning_curve(run_all(cfg, sim, ["fixed"], repeats=2), bin_nights=5)
     assert [r["night_start"] for r in rows] == [0, 5, 10]

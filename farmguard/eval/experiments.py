@@ -291,7 +291,7 @@ def e3_retreat(client: LLMClient, samples_csv: str | Path, n_frames: int = 4, li
 
 
 # ---------------------------------------------------------------------------- E4 simulator
-def e4_paired(outcomes: list, baselines: tuple[str, ...] = ("fixed", "bandit")) -> dict[str, Any]:
+def e4_paired(outcomes: list, baselines: tuple[str, ...] = ("fixed", "bandit", "bandit_sw")) -> dict[str, Any]:
     """McNemar on events is the plan's test, but events within a run share habituation state and are
     not independent. The run-level sign-flip test is the one that respects that: treat McNemar as
     descriptive. Holm-adjusted across this family. With few runs the run-level p has a floor."""
@@ -333,11 +333,13 @@ def _llm_warnings(summ: dict[str, dict[str, float]], client: LLMClient | None) -
     """LLMPolicy falls back to the bandit on any failure and still reports itself as "llm", so a
     dead backend would produce a clean-looking but false LLM result. Say so in the output."""
     out = []
-    llm = summ.get("llm")
-    if llm and llm["llm_fallback_rate"] > 0.01:
-        out.append(f"llm_fallback_rate={llm['llm_fallback_rate']:.1%}: these decisions were the bandit's")
-    if llm and client is not None and client.name == "mock":
-        out.append("llm column is the mock client (first enum value): pipeline check, not a result")
+    for p, s in summ.items():
+        if not s["llm_calls_per_event"]:
+            continue
+        if s["llm_fallback_rate"] > 0.01:
+            out.append(f"{p}: llm_fallback_rate={s['llm_fallback_rate']:.1%}: these decisions were the bandit's")
+        if client is not None and client.name == "mock":
+            out.append(f"{p} column is the mock client (first enum value): pipeline check, not a result")
     return out
 
 
@@ -378,7 +380,9 @@ def e4_grid(cfg: Config, sim_path: str | Path, policies: list[str], llm_client=N
                          "success_rate": s["success_rate"], "run_sd": s["success_rate_run_sd"],
                          "mean_time_in_field_s": s["mean_time_in_field_s"],
                          "late_success_rate": s["late_success_rate"],
-                         "llm_fallback_rate": s["llm_fallback_rate"]})
+                         "llm_fallback_rate": s["llm_fallback_rate"],
+                         "invalid_action_rate": s["invalid_action_rate"],
+                         "early_escalation_rate": s["early_escalation_rate"]})
         for name, t in e4_paired(outcomes).items():
             tests.append({**levels, "comparison": name, "mean_success_diff": t["mean_success_diff"],
                           "run_level_success_p": t["run_level_success_p"],
