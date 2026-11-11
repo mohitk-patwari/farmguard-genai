@@ -89,6 +89,18 @@ def test_llm_never_called_when_validator_would_force_escalation(cfg, sim):
     assert all(o.llm_calls <= (max_a - 1) + 1 for o in out)  # next-sound calls + first-sound update
 
 
+def test_sim_context_uses_the_live_agent_knobs(sim):
+    """bandit_window and immediate_escalation_species reach the simulator like the AgentWorker."""
+    cfg2 = load_config(overrides={"agent.policy.immediate_escalation_species": ["monkey"],
+                                  "agent.policy.bandit_window": 3})
+    pol, seen = build_policy("bandit_sw", seed=1), []
+    orig = pol.decide
+    pol.decide = lambda ctx: (seen.append(ctx), orig(ctx))[1]
+    run_policy(cfg2, sim, pol, make_events(sim, random.Random(2)), 4, 5)
+    assert seen and all(c.immediate_escalation_species == ("monkey",) for c in seen)
+    assert all(sum(s["window_trials"] for s in c.stats.values()) <= 3 for c in seen)
+
+
 def test_early_escalation_is_tracked(cfg, sim):
     quitter = MockClient(responder=lambda p, s, n: {"action": "escalate_farmer", "reason": "", "confidence": 1})
     summ = summarize(run_all(cfg, sim, ["llm"], quitter))["llm"]
@@ -123,6 +135,13 @@ def test_llm_runs_resume_from_cache_and_key_on_scenario(cfg, sim, tmp_path):
     sim["habituation"]["strength"] = 0.6
     run_all(cfg, sim, ["llm"], client, cache_dir=tmp_path)
     assert len(client.calls) > n
+
+
+def test_unknown_policy_fails_before_any_llm_call(cfg, sim):
+    client = MockClient()
+    with pytest.raises(ValueError):
+        run_all(cfg, sim, ["llm", "no_such_policy"], client)
+    assert client.calls == []
 
 
 def test_learning_curve_covers_all_nights(cfg, sim):

@@ -26,7 +26,9 @@ log = logging.getLogger("figures")
 # Categorical slots in validated order (node validate_palette.js, light mode, surface #ffffff).
 # Markers carry identity too: IEEE proceedings are often read in greyscale.
 POLICY_STYLE = {"fixed": ("#2a78d6", "o"), "random": ("#eb6834", "s"), "rule_chain": ("#1baf7a", "^"),
-                "bandit": ("#eda100", "D"), "llm": ("#e87ba4", "v")}
+                "bandit": ("#eda100", "D"), "llm": ("#e87ba4", "v"),
+                # ponytail: shares the bandit's hue (no validated 6th slot yet); the marker tells them apart
+                "bandit_sw": ("#eda100", "X")}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e1e0d9"
 SINGLE_COL = (3.5, 2.3)
 DOUBLE_COL = (7.16, 2.5)

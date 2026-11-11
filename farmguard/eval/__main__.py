@@ -46,8 +46,9 @@ def _headline(exp: str, out: dict[str, Any]) -> str:
     if exp == "e4":
         return f"SIMULATED, {out['sim_config']['effectiveness']['mode']}: " + " ".join(
                         f"{p}: {s['success_rate']:.3f} succ, {s['mean_time_in_field_s']:.0f}s"
-                        + (f", fallback {s['llm_fallback_rate']:.1%}, invalid {s['invalid_action_rate']:.1%}"
-                           if p == "llm" else "") + ";"
+                        + (f", fallback {s['llm_fallback_rate']:.1%}, invalid {s['invalid_action_rate']:.1%}, "
+                           f"early escalation {s['early_escalation_rate']:.1%}"
+                           if s["llm_calls_per_event"] else "") + ";"
                         for p, s in out["summary"].items())
     if exp == "e4-grid":
         return f"{out['cells']} cells x {len(out['policies'])} policies x {out['repeats']} repeats: see e4_grid.csv"
@@ -166,6 +167,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any] | str:
             out = E.e4_simulation(cfg, args.sim, policies, client, args.repeats or 5, mode)
             print(json.dumps({"mode": mode, "summary": out["summary"], "paired_tests": out["paired_tests"],
                               "warnings": out["warnings"]}, indent=2))
+            for p, s in out["summary"].items():
+                if s["llm_calls_per_event"]:
+                    print(f"{mode} {p}: invalid {s['invalid_action_rate']:.1%}, fallback {s['llm_fallback_rate']:.1%}, "
+                          f"early escalation {s['early_escalation_rate']:.1%}")
             if not args.no_log and (client is None or client.name != "mock"):
                 _log_result(args.exp, out, client)
         return out

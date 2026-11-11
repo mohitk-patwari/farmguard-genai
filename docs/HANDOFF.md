@@ -148,6 +148,12 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
 - `BanditPolicy` is stationary, while the simulated world is not (habituation). A discounted or
   sliding-window bandit would be a stronger, fairer baseline for the LLM. Worth adding before E4 is final.
 - `OllamaClient` sends no `seed`, so LLM runs are not exactly repeatable. E4 keeps each finished run.
+- One E4 repeat on 3b (Terminal 4, commit f9ce1d4, 364 decisions, simulated): 0 failed calls, 0 out of enum, but the
+  validator replaced an already-tried sound in 79 decisions: 16/123 at attempt 2, 63/87 at attempt 3. The prompt
+  already warns against this, and `validate` then plays `candidates[0]`, so those picks are not the LLM's. The bandit
+  never proposes a tried sound. Building the enum from `allowed - tried_this_event` would remove them. It changes the
+  decision code, so E4's LLM runs would have to be redone: decide before the full run. Log:
+  `results/e4_llm_runs/19084a00c2752883/llm_r0.decisions.jsonl` on the lead laptop (not committed).
 
 ## For Terminal 4 (experiments)
 - Species cooldown (`trigger.species_cooldown_s`, 60 s) means fewer events and alarms per clip, so E1 and E5
