@@ -199,23 +199,51 @@ non-significant test alone does not show ``unchanged''.}
 \inputfigure{e4_time_in_field}{Simulated mean time in field. Dominated by the assumed farmer arrival time.}{*}
 \inputfigure{e4_sensitivity}{Simulated success rate, marginal over the other factors of the sensitivity grid.}{*}
 \inputtable{e4_grid}
+\inputtable{e4_random_b30}
+\inputtable{e4_informed_b30}
+\inputtable{e4_random_llm}
+\inputtable{e4_informed_llm}
 
-Among the non-GenAI baselines, learning from outcomes added little over random rotation. The two are tied
-in the base scenario, and across the 36-cell grid the bandit's mean advantage is under one percentage
-point: significant in 13 cells, never above 4 points. The gain over the fixed policy comes mostly
-from rotation itself, and it shrinks sharply when habituation carries across sounds ($c=0.5$), the
-case the base scenario assumes away. \todo{Add the LLM column and compare; report it
-even if it loses to the bandit or to random. Check the wording against the final tables.}
+All E4 numbers are simulated. The LLM runs (Tables~\ref{tab:e4_random} and~\ref{tab:e4_informed}) use
+Qwen2.5-VL 3B on Ollama (seed 42, temperature from \texttt{settings.yaml}), five runs per setting, with the
+enum restricted to legal actions. The baselines were also run 30 times
+(Tables~\ref{tab:e4_random_b30} and~\ref{tab:e4_informed_b30}).
 
-\textbf{Timing probe, not a final result.} One simulated run of the LLM policy (Qwen2.5-VL 3B on Ollama,
-``random'' effectiveness, 60 nights, 154 events, 364 decisions) used the unconstrained enum (pre-fix), in which
-every allowed sound could be chosen, including ones already tried in the event. The run took 19.3\,min, with a
-median of 3.09\,s per decision. No call failed, so the fallback rate was 0\%, and no answer fell outside the enum.
-However, 21.7\% of decisions repeated a sound that had already failed in the event. The validator replaced each
-of these, which covers 38\% of in-event decisions (79 of 210), so those choices were not the LLM's. The LLM also
-called the farmer early in 15.6\% of events. The final runs restrict the enum to legal sounds (allowed, not yet
-tried, not on cooldown). This change was decided after seeing the probe.
-\todo{Replace with the constrained-enum runs and the sliding-window bandit baseline once both are merged.}
+\textbf{The LLM policy did not beat the baselines.} It lost to the Thompson-sampling bandit, to the
+sliding-window bandit and to random rotation in all five runs of both settings. With the ``random'' sound
+effectiveness, its success rate was 0.41 against 0.53 for each of the other three, a difference of about
+12 points. With the ``informed'' setting, it was 0.50 against 0.58--0.59, a difference of 8--9 points.
+Animals also stayed in the field longer (Table~\ref{tab:e4_random_tests}). Five runs out of five is the
+strongest result five runs can give, but after the Holm correction the sign test gives $p=0.19$, so the
+run-level evidence is not significant at 0.05. The event-level McNemar tests give $p<10^{-10}$. However,
+events within a run share habituation state, so those p-values overstate the evidence. We report the
+direction as consistent and the size as roughly 8--12 points, not as a confirmed effect.
+
+\textbf{Constraining the enum removed invalid actions.} In the earlier one-run timing probe the enum was
+unconstrained (pre-fix). There, 21.7\% of the LLM's decisions repeated a sound that had already failed in
+the event, and 15.6\% of events were escalated early. In 4276 constrained calls, no proposal fell outside
+the enum, the validator changed none, and no call failed, so the bandit fallback was never used. Early
+escalation fell to 6.3\% (``random'') and 1.9\% (``informed''), and escalating before the second attempt is
+now blocked except for elephants. We decided to constrain the enum after seeing the probe, so the probe is
+reported only as a measurement of the failure mode. The validator still guards every decision.
+
+\textbf{Why the LLM lost.} The decision logs suggest a position bias. In 75\% of calls (3224 of 4276) the
+model chose the first legal sound in the species' allow-list, whatever the success history said. Following
+the allow-list in order is exactly what \texttt{rule\_chain} does, and the LLM's success rate was close to
+\texttt{rule\_chain}'s (0.41 vs 0.42 and 0.50 vs 0.53). Three properties of this setup also favour the
+baselines. First, the prompt gives the LLM no world knowledge that the simulator rewards. No sound has a
+behaviour-specific effect, and the fair prompt deliberately omits habituation. Second, a 3B model is small.
+Third, random rotation already nearly matches the bandits. The case for an LLM policy therefore has to rest
+on what this simulator does not model, such as reading the VLM's scene description, explaining a choice to
+the farmer, or handling an unseen species, or on a larger model. It cannot rest on success rate here.
+
+Among the non-GenAI baselines, learning from outcomes added little over random rotation. Over 30 runs the
+bandit, the sliding-window bandit and random rotation are within one point of each other in both settings.
+Across the 36-cell grid (30 runs per cell), the bandit's mean advantage over random is 0.9 points. It is
+significant after the Holm correction in 7 cells and never exceeds 4 points. The sliding window adds
+nothing over the stationary bandit: its mean difference is $-0.1$ points, and it is significantly worse in
+3 cells and never better. The gain over the fixed policy comes mostly from rotation itself, and it shrinks
+sharply when habituation carries across sounds ($c=0.5$), the case the base scenario assumes away.
 
 \subsection{E5: Fewer false alarms?}
 \IfFileExists{tables/e5_ollama-qwen2.5vl-7b.tex}{\input{tables/e5_ollama-qwen2.5vl-7b.tex}}{\todo{E5 table: needs clips, intervals and a VLM}}

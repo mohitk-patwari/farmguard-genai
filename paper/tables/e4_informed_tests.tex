@@ -1,18 +1,16 @@
 \begin{table}[t]
 \centering
-\caption{Paired tests, simulated ``informed'' setting. Run-level sign-flip test, Holm-adjusted. Smallest possible p with 5 runs: 0.062.}
+\caption{Is the LLM better? Simulated ``informed'' setting, 5 runs. Holm-adjusted within these comparisons. Smallest possible run-level p with 5 runs: 0.062.}
 \label{tab:e4_informed_tests}
 \resizebox{\columnwidth}{!}{%
 \begin{tabular}{lrrrrrr}
 \toprule
-Comparison & Success diff & p (run) & p (Holm) & Time diff (s) & b/c & McNemar p \\
+Comparison & Success diff [95\% CI] & Runs won/lost & Sign p & Events b/c & McNemar p & Time diff (s) \\
 \midrule
-random vs fixed & +0.342 & 0.062 & 0.312 & -313 & 306/6 & <0.001 \\
-rule chain vs fixed & +0.288 & 0.062 & 0.312 & -264 & 252/0 & <0.001 \\
-bandit vs fixed & +0.353 & 0.062 & 0.312 & -324 & 313/3 & <0.001 \\
-random vs bandit & -0.011 & 0.250 & 0.312 & +10 & 38/48 & 0.332 \\
-rule chain vs bandit & -0.065 & 0.062 & 0.312 & +60 & 28/86 & <0.001 \\
+llm vs bandit & -0.090 [-0.105, -0.080] & 0/5 & 0.188 & 18/98 & <0.001 & +82 \\
+llm vs bandit sw & -0.077 [-0.097, -0.058] & 0/5 & 0.188 & 16/85 & <0.001 & +70 \\
+llm vs random & -0.079 [-0.090, -0.067] & 0/5 & 0.188 & 21/91 & <0.001 & +72 \\
 \bottomrule
 \end{tabular}}
-\\[2pt]{\footnotesize McNemar is descriptive only: events within a run share habituation state.}
+\\[2pt]{\footnotesize Diff and CI: mean of per-run differences, percentile bootstrap over runs (too narrow with few runs). McNemar pools events, which share habituation state within a run, so it overstates the evidence.}
 \end{table}

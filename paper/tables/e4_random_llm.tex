@@ -1,0 +1,15 @@
+\begin{table}[t]
+\centering
+\caption{LLM decisions, simulated ``random'' setting.}
+\label{tab:e4_random_llm}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+LLM run & Calls/event & Invalid & Fallback & Early escalation \\
+\midrule
+random, constrained enum & 2.53 & 0.0\% & 0.0\% & 6.3\% \\
+random, unconstrained enum (1-run probe) & 2.36 & 21.7\% & 0.0\% & 15.6\% \\
+\bottomrule
+\end{tabular}}
+\\[2pt]{\footnotesize Invalid = the validator changed the LLM's choice. Fallback = the call failed and the bandit decided.}
+\end{table}

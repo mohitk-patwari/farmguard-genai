@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\caption{SIMULATED deterrence, ``random'' effectiveness, 30 independent runs of 60 nights. All parameters are assumptions, not field data.}
+\label{tab:e4_random_b30}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Policy & Success (run mean) & 95\% CI & Run SD & First sound & Late & Time (s) & LLM calls/event \\
+\midrule
+fixed & 0.134 & 0.119-0.148 & 0.041 & 0.066 & 0.123 & 814 & 0.00 \\
+random & 0.526 & 0.505-0.546 & 0.060 & 0.216 & 0.518 & 454 & 0.00 \\
+rule chain & 0.415 & 0.390-0.438 & 0.069 & 0.140 & 0.414 & 556 & 0.00 \\
+bandit & 0.537 & 0.514-0.561 & 0.067 & 0.238 & 0.528 & 443 & 0.00 \\
+bandit (window) & 0.535 & 0.513-0.556 & 0.062 & 0.231 & 0.523 & 446 & 0.00 \\
+\bottomrule
+\end{tabular}}
+\\[2pt]{\footnotesize CI: percentile bootstrap over runs. Escalation rate is 1 - success by construction.}
+\end{table}
