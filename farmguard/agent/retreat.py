@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from farmguard.agent.clip_builder import MAX_SIDE, sample_frames, to_jpeg
+from farmguard.agent.clip_builder import MAX_IMAGES, MAX_SIDE, sample_frames, to_jpeg
 from farmguard.agent.llm.base import LLMClient
 from farmguard.agent.prompts import SYSTEM_VISION, retreat_prompt, retreat_schema
 from farmguard.events import FramePacket, RetreatStatus
@@ -103,7 +103,7 @@ def fusion_errors(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 class RetreatChecker:
     def __init__(self, buffer: FrameBuffer, client: LLMClient | None, observe_seconds: float = 12,
-                 gone_frames: int = 15, use_vlm: bool = True, n_vlm_frames: int = 4,
+                 gone_frames: int = 15, use_vlm: bool = True, n_vlm_frames: int = MAX_IMAGES,
                  max_side: int = MAX_SIDE):
         self.buffer = buffer
         self.client = client

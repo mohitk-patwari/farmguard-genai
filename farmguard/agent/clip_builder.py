@@ -11,9 +11,12 @@ import numpy as np
 
 from farmguard.events import FramePacket
 
-# Qwen2.5-VL's image tokens scale with pixels. 6 images at 768 px were ~6500 tokens against Ollama's 4096.
+# 6 images at 768 px were ~6500 tokens against Ollama's 4096. Smoke test 2 (2026-11-13, qwen2.5vl:3b): Ollama
+# charged ~1030 tokens per image even at 448 px (1 image + retreat prompt = 1209; 4 images = 4310-4435, all
+# rejected), so the image count, not max_side, is what fits the context.
 MAX_SIDE = 448
-MAX_IMAGES = 4  # crop + full frame + 2 neighbours
+OLLAMA_TOKENS_PER_IMAGE = 1035  # measured as above; tests check max_images against num_ctx with it
+MAX_IMAGES = 3  # crop + full frame + 1 neighbour
 
 
 def to_jpeg(img: np.ndarray, max_side: int = MAX_SIDE, quality: int = 85) -> bytes:

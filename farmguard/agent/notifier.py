@@ -149,6 +149,7 @@ class Notifier:
         if self.client is None:
             return template, template, "template"
         res = self.client.generate_json(alert_prompt(summary, self.language), alert_schema())
+        log.info("alert llm_latency_s=%.3f ok=%d", res.latency_s, res.data is not None)  # apart from policy calls
         data = res.data or {}
         message = str(data.get("message") or "").strip()
         if not message:

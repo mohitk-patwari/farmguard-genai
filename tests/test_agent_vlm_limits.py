@@ -6,7 +6,7 @@ import logging
 import cv2
 import numpy as np
 
-from farmguard.agent.clip_builder import build_event_images
+from farmguard.agent.clip_builder import OLLAMA_TOKENS_PER_IMAGE, build_event_images
 from farmguard.agent.llm.providers import MockClient, OllamaClient, build_client
 from farmguard.agent.vlm_check import VLMChecker
 from farmguard.config import load_config
@@ -21,10 +21,32 @@ def _pkts(n=5):
 def test_images_are_capped_and_downscaled():
     pkts = _pkts()
     images, layout = build_event_images(pkts[2], pkts, (100, 100, 400, 400))
-    assert len(images) == 4 and "2 neighbouring" in layout
+    assert len(images) == 3 and "1 neighbouring" in layout
     for jpeg in images:
         img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
         assert max(img.shape[:2]) <= 448
+
+
+def test_default_image_count_fits_num_ctx():
+    """Smoke test 2: 4 images (4310-4435 tokens) were all rejected at num_ctx 4096. Leave room for the
+    prompt text (~400 tokens with the VLM prompt) and the JSON answer (~200)."""
+    cfg = load_config()
+    n = cfg.get("agent.clip.max_images")
+    assert n * OLLAMA_TOKENS_PER_IMAGE + 600 <= cfg.get("agent.ollama.num_ctx")
+
+
+def test_live_system_uses_the_image_cap_and_enum_flag(tmp_path):
+    from farmguard.fast.detector import MockDetector
+    from farmguard.system import build_system
+    cfg = load_config(overrides={"agent.policy.constrain_enum": False, "agent.clip.max_images": 2,
+                                 "alarm.backend": "none", "memory.db_path": str(tmp_path / "m.sqlite"),
+                                 "logging.timing_csv": str(tmp_path / "t.csv"), "logging.events_jsonl": None,
+                                 "zones.file": str(tmp_path / "none.json")})
+    system = build_system(cfg, detector=MockDetector({}), llm_client=MockClient())
+    try:
+        assert system.agent.policy.constrain_enum is False and system.agent.retreat.n_vlm_frames == 2
+    finally:
+        system.agent.stop(timeout=5)
 
 
 def test_image_cap_is_a_knob():

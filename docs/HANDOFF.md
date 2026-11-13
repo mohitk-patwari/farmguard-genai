@@ -55,6 +55,55 @@ Recorded 2026-11-02 on the lead laptop (Windows 11, 16 GB RAM, RTX 3050 6 GB, dr
   measured. Use 3b on this laptop; 7b needs more VRAM than it has. Neither is ready for a real run until the
   items below are fixed.
 
+## Smoke test 2 (Terminal 3)
+2026-11-13, branch `agent` at 89607de plus this commit's fixes. Model `qwen2.5vl:3b` (Ollama, num_ctx 4096,
+temperature 0.2, seed 42), YOLO-World `yolov8s-worldv2-farmguard.pt`, `--mute`, Hindi alerts, `constrain_enum: true`.
+Same 10 s clip as above, whole frame as the field, fresh memory per run. **A smoke test: not E2/E3/E5 results, one
+clip, 3 events per run, no ground truth beyond "the clip shows wild boars".** The fg-agent venv has CPU-only torch
+(2.15.0+cpu), so detect and alarm times are CPU numbers, NOT comparable with the GPU numbers above.
+
+First Run A (as committed in 737f0ea) failed every multi-image VLM call: Ollama charged ~1030 tokens per image even
+at 448 px, so 4 images were 4402-4435 tokens (event check) and 4310-4312 (retreat check) against 4096: HTTP 400,
+0/3 event checks. Fixed (3 images, see below) and Run A was rerun once. Run B is with the fix.
+
+| | Run A (override on) | Run B (override off) |
+|---|---|---|
+| Events (T1: 11 before species cooldown) | 3 | 3 |
+| VLM event check ok / calls | 3/3 | 3/3 |
+| Prompt tokens, event check (3 images): median / max | 3378 / 3401 | 3378 / 3401 |
+| Prompt tokens, retreat (1-3 images) / text calls: max | 3278 / 366 | 3278 / 366 |
+| Detector -> VLM (conf) -> effective, per event | cattle -> boar (med) -> cattle; elephant -> boar (med) -> elephant; boar -> boar (med) -> boar | same three |
+| Overridden / possible_false_alarm | 0 / 0 | 0 / 0 |
+| Retreat after 1st alarm (tracker / VLM / fused) | still / still / still, all 3 | same |
+| Retreat after 2nd sound (tracker / VLM / fused) | still / leaving / leaving, all 3 | same |
+| Policy actions (in-event) | dog_bark, tiger_roar, gunshot | dog_bark, tiger_roar, gunshot |
+| Invalid actions / escalations | 0/6 decisions / none | 0/6 / none |
+| Alerts: LLM / template_ungrounded | 0 / 3 | 1 / 2 |
+| Detect (CPU) median / max ms | 118.6 / 170.3 | 101.7 / 130.7 |
+| Alarm read -> start median / max ms (no audio) | 120.1 / 123.0 | 101.1 / 120.9 |
+| Alarm first-zone -> start median / max ms | 631.6 / 634.5 | 438.0 / 458.5 |
+| VLM event check median / max s | 7.6 / 12.6 | 12.4 / 13.3 |
+| VLM retreat median / max s | 6.8 / 13.2 | 6.3 / 11.5 |
+| Policy call median / max s | 3.1 / 3.3 | 3.1 / 3.3 |
+| Alert call median / max s | 6.0 / 6.1 | 6.0 / 6.6 |
+| Peak VRAM (idle 629 MB) / lowest free RAM | 4651 MB / 6.03 GB | 4651 MB / 5.97 GB |
+| Wall time | 98 s | 100 s |
+
+Findings:
+- The VLM named wild boar on all 3 events (the detector was right on 1), but only at medium confidence, so the
+  `high` threshold kept the detector's wrong species twice in both runs. With override off or on, behaviour was the
+  same on this clip: it neither helped nor hurt. A `medium` threshold would have fixed 2/3 here, but that's 3 events
+  with no accuracy measurement: decide it from E2, not from this.
+- The retreat check after the 2nd sound saw ONE frame: the sound was played at the end of the 10 s clip, so the
+  window had only the last frame, and "leaving" (recorded as success in memory) came from that frame. A live camera
+  doesn't have this; short clips do. Not fixed: needs a rule for truncated windows (E3/E5 on clips) - see T3 notes.
+- Grounding check: 5 of 6 LLM alerts were rejected, each for a paraphrased sound name ("आदमी ने चिल्लाने की आवाज़" for
+  "आदमी के चिल्लाने की आवाज़"; "आवाज़ मधुमक्खियों"; "उसकी आवाज़" for the boar sound). The one accepted (Run B,
+  cattle) ends with a nonsense sentence ("यदि यह नहीं जा रहा है, तो फ़रमान की जाने लायक है" = "if it is not leaving, a
+  decree is worth issuing"), which the check can't judge. Same nonsense in the first, overflowing Run A's accepted
+  boar alert ("...सायरन गिरे" = "the sirens fell"; "फ़रमान करें" = "issue a decree"). 3b's Hindi is weak.
+- Constrained enum: 0 invalid, 0 escalations; elephant's enum included `escalate_farmer` at attempt 1 as designed.
+
 ## For Terminal 1 (integrator)
 - Add to requirements.txt: `lap>=0.5.12`. Without it ultralytics runs `pip install` from inside the
   frame loop; the detector now refuses to start instead. `soundfile` is needed by
@@ -219,3 +268,7 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
   events.jsonl and `farmguard run` results log `detector_species, vlm_species, vlm_confidence, effective_species,
   overridden, possible_false_alarm`. A VLM "none" at high confidence with no animal in the retreat check stops the
   sounds, sends a fixed low-priority note (source `false_alarm_note`) and records no outcome in memory.
+- From 2026-11-13: `agent.clip.max_images` is 3 (crop + full frame + 1 neighbour), and the retreat check sends the
+  same number of frames (it sent 4 before). 4 images overflowed num_ctx 4096 on Ollama (smoke test 2), so E2's burst
+  condition is smaller again. `farmguard run` now honours `agent.policy.constrain_enum` (it was always true there).
+  Retreat windows cut short by the end of a clip still get a verdict from the last frame: count those apart in E3/E5.

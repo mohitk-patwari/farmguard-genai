@@ -139,7 +139,7 @@ def main(argv=None) -> None:
 
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+                        format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s")
     try:
         args.fn(args)
     except KeyboardInterrupt:

@@ -67,7 +67,8 @@ agent:
     frames_after: 2
     crop_padding: 0.25          # AlexKapy: 15-25% padding around the box
     max_side: 448               # longest side, event and retreat images. Qwen2.5-VL tokens scale with pixels
-    max_images: 4               # crop + full frame + 2 neighbours. Few-shot adds its own: raise num_ctx for that condition
+    max_images: 3               # crop + full frame + 1 neighbour; also the retreat check's frames. ~1030 tokens per image
+                                # on Ollama whatever max_side (smoke test 2): 4 overflowed 4096. Few-shot: raise num_ctx
   fewshot:                      # labelled examples sent before the event images (E2 ablates this)
     enabled: false              # off until E2 shows it helps on our model; BLIP's 7.61% -> 91.0% was another model and task
     dir: "data/fewshot"         # <dir>/<species key, none or other_animal>/*.jpg
