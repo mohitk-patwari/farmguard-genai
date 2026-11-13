@@ -289,7 +289,7 @@ def test_figures_make_paper_inputs_and_refuse_mock_or_fallback(tmp_path, results
     tex = (tables / "e4_random.tex").read_text(encoding="utf-8")
     assert "assumptions, not field data" in tex and r"\begin{tabular}" in tex
     assert (figs / "e4_learning_curves.pdf").exists() and (figs / "e4_time_in_field.pdf").exists()
-    assert "Smallest possible p with 2 runs: 0.5" in (tables / "e4_random_tests.tex").read_text(encoding="utf-8")
+    assert "Smallest possible run-level p with 2 runs: 0.5" in (tables / "e4_random_tests.tex").read_text(encoding="utf-8")
 
 
 # ------------------------------------------------------------------ entry point

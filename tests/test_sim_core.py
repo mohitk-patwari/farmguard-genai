@@ -137,6 +137,18 @@ def test_llm_runs_resume_from_cache_and_key_on_scenario(cfg, sim, tmp_path):
     assert len(client.calls) > n
 
 
+def test_e4_primary_family_and_run_level_stats(cfg, sim):
+    from farmguard.eval.experiments import E4_PRIMARY, e4_paired
+    t = e4_paired(run_all(cfg, sim, ["fixed", "random", "bandit", "bandit_sw", "llm"], MockClient(), repeats=4))
+    assert set(E4_PRIMARY) <= set(t)
+    for k, v in t.items():
+        assert v["holm_family"] == ("primary" if k in E4_PRIMARY else "secondary")
+        assert v["sign_test_p_holm"] >= v["sign_test_p"] and v["mcnemar_p_holm"] >= v["mcnemar_p"]
+        lo, hi = v["success_diff_ci95"]
+        assert lo <= v["mean_success_diff"] <= hi and v["runs_won"] + v["runs_lost"] <= 4
+    assert M.sign_test([1, 1, 1, 1, 1]) == 0.0625 and M.sign_test([0, 0]) == 1.0
+
+
 def test_unknown_policy_fails_before_any_llm_call(cfg, sim):
     client = MockClient()
     with pytest.raises(ValueError):

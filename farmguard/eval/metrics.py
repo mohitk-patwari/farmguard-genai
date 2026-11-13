@@ -148,6 +148,23 @@ def median_diff_ci(a: Sequence[float], b: Sequence[float], n_boot: int = 2000,
             "ci_low": percentile(boots, 0.025), "ci_high": percentile(boots, 0.975)}
 
 
+def sign_test(diffs: Sequence[float]) -> float:
+    """Exact two-sided sign test (zeros dropped): uses only which policy won each pair."""
+    pos, neg = sum(x > 0 for x in diffs), sum(x < 0 for x in diffs)
+    return mcnemar(pos, neg)  # the same exact binomial test on the discordant counts
+
+
+def bootstrap_mean_ci(vals: Sequence[float], n_boot: int = 10000, seed: int = 0) -> tuple[float, float]:
+    """95% percentile bootstrap CI of the mean. With 5 values it is too narrow (only 126 distinct
+    resamples, no small-sample correction): read it as descriptive."""
+    if not vals:
+        return (float("nan"), float("nan"))
+    rng = random.Random(seed)
+    v = list(vals)
+    boots = sorted(statistics.fmean(rng.choices(v, k=len(v))) for _ in range(n_boot))
+    return (percentile(boots, 0.025), percentile(boots, 0.975))
+
+
 def holm(pvals: dict[str, float]) -> dict[str, float]:
     """Holm-Bonferroni adjusted p-values for one family of tests."""
     adjusted, running = {}, 0.0

@@ -89,7 +89,7 @@ def _save(fig, path: Path) -> None:
 
 
 def _pol_label(p: str) -> str:
-    return {"rule_chain": "rule chain", "llm": "LLM"}.get(p, p)
+    return {"rule_chain": "rule chain", "llm": "LLM", "bandit_sw": "bandit (window)"}.get(p, p)
 
 
 def _p(v: float) -> str:
@@ -116,6 +116,19 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
+def e4_summary_table(data: dict[str, Any], path: Path, label: str, mode: str) -> None:
+    summ = data["summary"]
+    runs = next(iter(summ.values()))["runs"]
+    _table(path, f"SIMULATED deterrence, ``{mode}'' effectiveness, {runs} independent runs of "
+           f"{data['sim_config']['nights']} nights. All parameters are assumptions, not field data.", label,
+           ["Policy", "Success (run mean)", "95% CI", "Run SD", "First sound", "Late", "Time (s)", "LLM calls/event"],
+           [[_pol_label(p), f"{s['run_mean_success']:.3f}",
+             f"{s['run_mean_success_ci95'][0]:.3f}-{s['run_mean_success_ci95'][1]:.3f}",
+             f"{s['success_rate_run_sd']:.3f}", f"{s['first_sound_success']:.3f}", f"{s['late_success_rate']:.3f}",
+             f"{s['mean_time_in_field_s']:.0f}", f"{s['llm_calls_per_event']:.2f}"] for p, s in summ.items()],
+           "CI: percentile bootstrap over runs. Escalation rate is 1 - success by construction.")
+
+
 def e4(results: Path, figs: Path, tables: Path) -> None:
     modes = [m for m in ("random", "informed") if _load(results / f"e4_{m}.json")]
     if not modes:
@@ -126,25 +139,33 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
         data = _load(results / f"e4_{mode}.json")
         summ = data["summary"]
         runs = next(iter(summ.values()))["runs"]
-        _table(tables / f"e4_{mode}.tex",
-               f"Simulated deterrence, ``{mode}'' effectiveness, {runs} independent runs of "
-               f"{data['sim_config']['nights']} nights. All parameters are assumptions, not field data.",
-               f"tab:e4_{mode}",
-               ["Policy", "Success", "95% CI", "Run SD", "First sound", "Late", "Time (s)", "LLM calls/event"],
-               [[_pol_label(p), f"{s['success_rate']:.3f}",
-                 f"{s['success_ci95'][0]:.3f}-{s['success_ci95'][1]:.3f}", f"{s['success_rate_run_sd']:.3f}",
-                 f"{s['first_sound_success']:.3f}", f"{s['late_success_rate']:.3f}",
-                 f"{s['mean_time_in_field_s']:.0f}", f"{s['llm_calls_per_event']:.2f}"] for p, s in summ.items()],
-               "Wilson CI treats events as independent and is too narrow; Run SD is the spread between runs. "
-               "Escalation rate is 1 - success by construction.")
+        e4_summary_table(data, tables / f"e4_{mode}.tex", f"tab:e4_{mode}", mode)
+        b30 = _load(results / "e4_baselines30" / f"e4_{mode}.json")
+        if b30:
+            e4_summary_table(b30, tables / f"e4_{mode}_b30.tex", f"tab:e4_{mode}_b30", mode)
+        prim = {k: t for k, t in data["paired_tests"].items() if t.get("holm_family") == "primary"}
         _table(tables / f"e4_{mode}_tests.tex",
-               f"Paired tests, simulated ``{mode}'' setting. Run-level sign-flip test, Holm-adjusted. "
-               f"Smallest possible p with {runs} runs: {2 / 2 ** runs:.2g}.", f"tab:e4_{mode}_tests",
-               ["Comparison", "Success diff", "p (run)", "p (Holm)", "Time diff (s)", "b/c", "McNemar p"],
-               [[k.replace("_vs_", " vs ").replace("_", " "), f"{t['mean_success_diff']:+.3f}",
-                 _p(t["run_level_success_p"]), _p(t["run_level_success_p_holm"]), f"{t['mean_time_diff_s']:+.0f}",
-                 f"{t['b']}/{t['c']}", _p(t["mcnemar_p"])] for k, t in data["paired_tests"].items()],
-               "McNemar is descriptive only: events within a run share habituation state.")
+               f"Is the LLM better? Simulated ``{mode}'' setting, {runs} runs. Holm-adjusted within these "
+               f"comparisons. Smallest possible run-level p with {runs} runs: {2 / 2 ** runs:.2g}.",
+               f"tab:e4_{mode}_tests",
+               ["Comparison", "Success diff [95% CI]", "Runs won/lost", "Sign p", "Events b/c", "McNemar p",
+                "Time diff (s)"],
+               [[k.replace("_vs_", " vs ").replace("_", " "),
+                 f"{t['mean_success_diff']:+.3f} [{t['success_diff_ci95'][0]:+.3f}, {t['success_diff_ci95'][1]:+.3f}]",
+                 f"{t['runs_won']}/{t['runs_lost']}", _p(t["sign_test_p_holm"]), f"{t['b']}/{t['c']}",
+                 _p(t["mcnemar_p_holm"]), f"{t['mean_time_diff_s']:+.0f}"] for k, t in prim.items()],
+               "Diff and CI: mean of per-run differences, percentile bootstrap over runs (too narrow with few runs). "
+               "McNemar pools events, which share habituation state within a run, so it overstates the evidence.")
+        llm_rows = [(f"{mode}, constrained enum", s) for p, s in summ.items() if s["llm_calls_per_event"]]
+        probe = _load(results / "probe_3b" / f"e4_{mode}.json")
+        if probe:
+            llm_rows.append((f"{mode}, unconstrained enum (1-run probe)", probe["summary"]["llm"]))
+        if llm_rows:
+            _table(tables / f"e4_{mode}_llm.tex", f"LLM decisions, simulated ``{mode}'' setting.",
+                   f"tab:e4_{mode}_llm", ["LLM run", "Calls/event", "Invalid", "Fallback", "Early escalation"],
+                   [[name, f"{s['llm_calls_per_event']:.2f}", f"{s['invalid_action_rate']:.1%}",
+                     f"{s['llm_fallback_rate']:.1%}", f"{s['early_escalation_rate']:.1%}"] for name, s in llm_rows],
+                   "Invalid = the validator changed the LLM's choice. Fallback = the call failed and the bandit decided.")
 
         ax = axes[0][i]
         by: dict[str, list[dict]] = defaultdict(list)

@@ -33,6 +33,7 @@ from farmguard.agent.vlm_check import VLMChecker
 from farmguard.config import ROOT, Config, load_config
 from farmguard.eval.labels import read_rows, select
 from farmguard.eval.metrics import (
+    bootstrap_mean_ci,
     classification_report,
     holm,
     latency_summary,
@@ -40,6 +41,7 @@ from farmguard.eval.metrics import (
     mcnemar,
     median_diff_ci,
     paired_permutation,
+    sign_test,
     wilcoxon_signed_rank,
     wilson_interval,
 )
@@ -290,41 +292,51 @@ def e3_retreat(client: LLMClient, samples_csv: str | Path, n_frames: int = 4, li
 
 
 # ---------------------------------------------------------------------------- E4 simulator
+E4_PRIMARY = ("llm_vs_bandit_sw", "llm_vs_bandit", "llm_vs_random")  # the paper's question, one Holm family
+
+
 def e4_paired(outcomes: list, baselines: tuple[str, ...] = ("fixed", "bandit", "bandit_sw")) -> dict[str, Any]:
-    """McNemar on events is the plan's test, but events within a run share habituation state and are
-    not independent. The run-level sign-flip test is the one that respects that: treat McNemar as
-    descriptive. Holm-adjusted across this family. With few runs the run-level p has a floor."""
+    """Event-level McNemar is the plan's test, but events within a run share habituation state and
+    are not independent, so it overstates the evidence. The run-level tests (sign test, sign-flip
+    permutation, bootstrap CI of the mean difference) respect that; their p has a floor with few
+    runs (5 runs: 0.0625). Holm is applied per test type within two families: E4_PRIMARY, and
+    every other comparison."""
     by: dict[str, list] = {}
     for o in outcomes:
         by.setdefault(o.policy, []).append(o)
+    pairs = [(p, base) for base in baselines if base in by for p in by if p != base]
+    if "llm" in by and "random" in by:
+        pairs.append(("llm", "random"))
     tests: dict[str, Any] = {}
-    for base in baselines:
-        ref = by.get(base)
-        if ref is None:
+    for p, base in pairs:
+        os_, ref = by[p], by[base]
+        if len(os_) != len(ref) or f"{base}_vs_{p}" in tests or f"{p}_vs_{base}" in tests:
             continue
-        for p, os_ in by.items():
-            if p == base or len(os_) != len(ref) or f"{base}_vs_{p}" in tests:
-                continue
-            if any((o.run, o.event) != (f.run, f.event) for o, f in zip(os_, ref)):
-                raise ValueError(f"{p} and {base} are not paired on the same events")
-            b = sum(o.success and not f.success for o, f in zip(os_, ref))
-            c = sum(f.success and not o.success for o, f in zip(os_, ref))
-            runs: dict[int, list[list[float]]] = {}
-            for o, f in zip(os_, ref):
-                d = runs.setdefault(o.run, [[], []])
-                d[0].append(o.success - f.success)
-                d[1].append(o.time_in_field_s - f.time_in_field_s)
-            succ_d = [statistics.fmean(v[0]) for v in runs.values()]
-            time_d = [statistics.fmean(v[1]) for v in runs.values()]
-            tests[f"{p}_vs_{base}"] = {
-                "b": b, "c": c, "mcnemar_p": mcnemar(b, c), "runs": len(runs),
-                "mean_success_diff": statistics.fmean(succ_d),
-                "run_level_success_p": paired_permutation(succ_d),
-                "mean_time_diff_s": statistics.fmean(time_d),
-                "run_level_time_p": paired_permutation(time_d)}
-    adjusted = holm({k: v["run_level_success_p"] for k, v in tests.items()})
-    for k, v in tests.items():
-        v["run_level_success_p_holm"] = adjusted[k]
+        if any((o.run, o.event) != (f.run, f.event) for o, f in zip(os_, ref)):
+            raise ValueError(f"{p} and {base} are not paired on the same events")
+        b = sum(o.success and not f.success for o, f in zip(os_, ref))
+        c = sum(f.success and not o.success for o, f in zip(os_, ref))
+        runs: dict[int, list[list[float]]] = {}
+        for o, f in zip(os_, ref):
+            d = runs.setdefault(o.run, [[], []])
+            d[0].append(o.success - f.success)
+            d[1].append(o.time_in_field_s - f.time_in_field_s)
+        succ_d = [statistics.fmean(v[0]) for v in runs.values()]
+        time_d = [statistics.fmean(v[1]) for v in runs.values()]
+        tests[f"{p}_vs_{base}"] = {
+            "b": b, "c": c, "mcnemar_p": mcnemar(b, c), "runs": len(runs),
+            "runs_won": sum(x > 0 for x in succ_d), "runs_lost": sum(x < 0 for x in succ_d),
+            "mean_success_diff": statistics.fmean(succ_d),
+            "success_diff_ci95": bootstrap_mean_ci(succ_d),
+            "sign_test_p": sign_test(succ_d),
+            "run_level_success_p": paired_permutation(succ_d),
+            "mean_time_diff_s": statistics.fmean(time_d),
+            "run_level_time_p": paired_permutation(time_d)}
+    for family in ([k for k in tests if k in E4_PRIMARY], [k for k in tests if k not in E4_PRIMARY]):
+        for key in ("run_level_success_p", "sign_test_p", "mcnemar_p"):
+            for k, adj in holm({k: tests[k][key] for k in family}).items():
+                tests[k][f"{key}_holm"] = adj
+                tests[k]["holm_family"] = "primary" if k in E4_PRIMARY else "secondary"
     return tests
 
 
@@ -352,9 +364,15 @@ def e4_simulation(cfg: Config, sim_path: str | Path, policies: list[str], llm_cl
     outcomes = run_all(cfg, sim, policies, llm_client, repeats, cache_dir=RESULTS / "e4_llm_runs")
     save_outcomes(outcomes, RESULTS / f"e4_{mode}_outcomes.csv")
     summ = summarize(outcomes)
-    for s in summ.values():
+    run_rates: dict[str, dict[int, list[bool]]] = {}
+    for o in outcomes:
+        run_rates.setdefault(o.policy, {}).setdefault(o.run, []).append(o.success)
+    for p, s in summ.items():
         n = int(s["events"])
-        s["success_ci95"] = wilson_interval(round(s["success_rate"] * n), n)
+        s["success_ci95"] = wilson_interval(round(s["success_rate"] * n), n)  # events as independent: too narrow
+        rates = [sum(v) / len(v) for v in run_rates[p].values()]
+        s["run_mean_success"] = statistics.fmean(rates)
+        s["run_mean_success_ci95"] = bootstrap_mean_ci(rates)  # runs as the unit
     curve = learning_curve(outcomes)
     _write_csv(f"e4_{mode}_learning_curve.csv", curve)
     _write_csv(f"e4_{mode}_summary.csv", [{"policy": p, **s} for p, s in summ.items()])
