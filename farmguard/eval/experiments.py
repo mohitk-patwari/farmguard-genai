@@ -309,22 +309,28 @@ def e4_paired(outcomes: list, baselines: tuple[str, ...] = ("fixed", "bandit", "
         pairs.append(("llm", "random"))
     tests: dict[str, Any] = {}
     for p, base in pairs:
-        os_, ref = by[p], by[base]
-        if len(os_) != len(ref) or f"{base}_vs_{p}" in tests or f"{p}_vs_{base}" in tests:
+        if len(by[p]) != len(by[base]) or f"{base}_vs_{p}" in tests or f"{p}_vs_{base}" in tests:
             continue
-        if any((o.run, o.event) != (f.run, f.event) for o, f in zip(os_, ref)):
-            raise ValueError(f"{p} and {base} are not paired on the same events")
-        b = sum(o.success and not f.success for o, f in zip(os_, ref))
-        c = sum(f.success and not o.success for o, f in zip(os_, ref))
-        runs: dict[int, list[list[float]]] = {}
-        for o, f in zip(os_, ref):
-            d = runs.setdefault(o.run, [[], []])
-            d[0].append(o.success - f.success)
-            d[1].append(o.time_in_field_s - f.time_in_field_s)
-        succ_d = [statistics.fmean(v[0]) for v in runs.values()]
-        time_d = [statistics.fmean(v[1]) for v in runs.values()]
-        tests[f"{p}_vs_{base}"] = {
-            "b": b, "c": c, "mcnemar_p": mcnemar(b, c), "runs": len(runs),
+        tests[f"{p}_vs_{base}"] = paired_stats(by[p], by[base], f"{p} and {base}")
+    for family in ([k for k in tests if k in E4_PRIMARY], [k for k in tests if k not in E4_PRIMARY]):
+        holm_family(tests, family, "primary" if family and family[0] in E4_PRIMARY else "secondary")
+    return tests
+
+
+def paired_stats(os_: list, ref: list, what: str = "policies") -> dict[str, Any]:
+    """One paired comparison of two outcome lists over the same (run, event) stream."""
+    if len(os_) != len(ref) or any((o.run, o.event) != (f.run, f.event) for o, f in zip(os_, ref)):
+        raise ValueError(f"{what} are not paired on the same events")
+    b = sum(o.success and not f.success for o, f in zip(os_, ref))
+    c = sum(f.success and not o.success for o, f in zip(os_, ref))
+    runs: dict[int, list[list[float]]] = {}
+    for o, f in zip(os_, ref):
+        d = runs.setdefault(o.run, [[], []])
+        d[0].append(o.success - f.success)
+        d[1].append(o.time_in_field_s - f.time_in_field_s)
+    succ_d = [statistics.fmean(v[0]) for v in runs.values()]
+    time_d = [statistics.fmean(v[1]) for v in runs.values()]
+    return {"b": b, "c": c, "mcnemar_p": mcnemar(b, c), "runs": len(runs),
             "runs_won": sum(x > 0 for x in succ_d), "runs_lost": sum(x < 0 for x in succ_d),
             "mean_success_diff": statistics.fmean(succ_d),
             "success_diff_ci95": bootstrap_mean_ci(succ_d),
@@ -332,12 +338,14 @@ def e4_paired(outcomes: list, baselines: tuple[str, ...] = ("fixed", "bandit", "
             "run_level_success_p": paired_permutation(succ_d),
             "mean_time_diff_s": statistics.fmean(time_d),
             "run_level_time_p": paired_permutation(time_d)}
-    for family in ([k for k in tests if k in E4_PRIMARY], [k for k in tests if k not in E4_PRIMARY]):
-        for key in ("run_level_success_p", "sign_test_p", "mcnemar_p"):
-            for k, adj in holm({k: tests[k][key] for k in family}).items():
-                tests[k][f"{key}_holm"] = adj
-                tests[k]["holm_family"] = "primary" if k in E4_PRIMARY else "secondary"
-    return tests
+
+
+def holm_family(tests: dict[str, Any], family: list[str], name: str) -> None:
+    """Holm per test type within one family; adds *_holm fields and holm_family in place."""
+    for key in ("run_level_success_p", "sign_test_p", "mcnemar_p"):
+        for k, adj in holm({k: tests[k][key] for k in family}).items():
+            tests[k][f"{key}_holm"] = adj
+            tests[k]["holm_family"] = name
 
 
 def _llm_warnings(summ: dict[str, dict[str, float]], client: LLMClient | None) -> list[str]:

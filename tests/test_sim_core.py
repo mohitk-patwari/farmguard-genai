@@ -1,6 +1,7 @@
 """Simulator and experiment-statistics tests. No network, no real models."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import random
 
@@ -147,6 +148,22 @@ def test_e4_primary_family_and_run_level_stats(cfg, sim):
         lo, hi = v["success_diff_ci95"]
         assert lo <= v["mean_success_diff"] <= hi and v["runs_won"] + v["runs_lost"] <= 4
     assert M.sign_test([1, 1, 1, 1, 1]) == 0.0625 and M.sign_test([0, 0]) == 1.0
+
+
+def test_e4_ablation_is_one_holm_family_on_shared_repeats(cfg, sim):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("abl", cfg.root / "scripts" / "e4_ablation.py")
+    abl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(abl)
+    by = {}
+    for o in run_all(cfg, sim, ["random", "bandit", "llm", "llm_bandit"], MockClient(), repeats=3):
+        by.setdefault(o.policy, []).append(o)
+    ordered = {"llm": [o for o in by["llm"] if o.run < 2]}  # fewer repeats, like the 773ad66 run
+    t = abl.ablation(by, ordered)
+    assert set(t) == {"llm_vs_bandit", "llm_vs_random", "llm_bandit_vs_bandit", "llm_shuffled_vs_llm_ordered"}
+    assert t["llm_shuffled_vs_llm_ordered"]["runs"] == 2 and all(v["holm_family"] == "ablation" for v in t.values())
+    with pytest.raises(ValueError):  # same indices, different events: must not pair
+        abl.ablation(by, {"llm": [dataclasses.replace(o, species="x") for o in ordered["llm"]]})
 
 
 def test_unknown_policy_fails_before_any_llm_call(cfg, sim):

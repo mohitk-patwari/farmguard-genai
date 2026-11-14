@@ -28,7 +28,9 @@ log = logging.getLogger("figures")
 POLICY_STYLE = {"fixed": ("#2a78d6", "o"), "random": ("#eb6834", "s"), "rule_chain": ("#1baf7a", "^"),
                 "bandit": ("#eda100", "D"), "llm": ("#e87ba4", "v"),
                 # ponytail: shares the bandit's hue (no validated 6th slot yet); the marker tells them apart
-                "bandit_sw": ("#eda100", "X")}
+                "bandit_sw": ("#eda100", "X"),
+                # ponytail: shares the LLM's hue, same reason; a hybrid of llm and bandit
+                "llm_bandit": ("#e87ba4", "P")}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e1e0d9"
 SINGLE_COL = (3.5, 2.3)
 DOUBLE_COL = (7.16, 2.5)
@@ -89,7 +91,7 @@ def _save(fig, path: Path) -> None:
 
 
 def _pol_label(p: str) -> str:
-    return {"rule_chain": "rule chain", "llm": "LLM", "bandit_sw": "bandit (window)"}.get(p, p)
+    return {"rule_chain": "rule chain", "llm": "LLM", "bandit_sw": "bandit (window)", "llm_bandit": "LLM + bandit"}.get(p, p)
 
 
 def _p(v: float) -> str:
@@ -116,10 +118,10 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
-def e4_summary_table(data: dict[str, Any], path: Path, label: str, mode: str) -> None:
+def e4_summary_table(data: dict[str, Any], path: Path, label: str, mode: str, tag: str = "") -> None:
     summ = data["summary"]
     runs = next(iter(summ.values()))["runs"]
-    _table(path, f"SIMULATED deterrence, ``{mode}'' effectiveness, {runs} independent runs of "
+    _table(path, f"{tag}SIMULATED deterrence, ``{mode}'' effectiveness, {runs} independent runs of "
            f"{data['sim_config']['nights']} nights. All parameters are assumptions, not field data.", label,
            ["Policy", "Success (run mean)", "95% CI", "Run SD", "First sound", "Late", "Time (s)", "LLM calls/event"],
            [[_pol_label(p), f"{s['run_mean_success']:.3f}",
@@ -129,7 +131,8 @@ def e4_summary_table(data: dict[str, Any], path: Path, label: str, mode: str) ->
            "CI: percentile bootstrap over runs. Escalation rate is 1 - success by construction.")
 
 
-def e4(results: Path, figs: Path, tables: Path) -> None:
+def e4(results: Path, figs: Path, tables: Path, name: str = "e4", tag: str = "") -> None:
+    """tag (e.g. 'Ordered options (773ad66). ') prefixes every caption, so two E4 sets cannot be confused."""
     modes = [m for m in ("random", "informed") if _load(results / f"e4_{m}.json")]
     if not modes:
         return
@@ -139,15 +142,15 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
         data = _load(results / f"e4_{mode}.json")
         summ = data["summary"]
         runs = next(iter(summ.values()))["runs"]
-        e4_summary_table(data, tables / f"e4_{mode}.tex", f"tab:e4_{mode}", mode)
+        e4_summary_table(data, tables / f"{name}_{mode}.tex", f"tab:{name}_{mode}", mode, tag)
         b30 = _load(results / "e4_baselines30" / f"e4_{mode}.json")
         if b30:
-            e4_summary_table(b30, tables / f"e4_{mode}_b30.tex", f"tab:e4_{mode}_b30", mode)
+            e4_summary_table(b30, tables / f"{name}_{mode}_b30.tex", f"tab:{name}_{mode}_b30", mode)
         prim = {k: t for k, t in data["paired_tests"].items() if t.get("holm_family") == "primary"}
-        _table(tables / f"e4_{mode}_tests.tex",
-               f"Is the LLM better? Simulated ``{mode}'' setting, {runs} runs. Holm-adjusted within these "
+        _table(tables / f"{name}_{mode}_tests.tex",
+               f"{tag}Is the LLM better? Simulated ``{mode}'' setting, {runs} runs. Holm-adjusted within these "
                f"comparisons. Smallest possible run-level p with {runs} runs: {2 / 2 ** runs:.2g}.",
-               f"tab:e4_{mode}_tests",
+               f"tab:{name}_{mode}_tests",
                ["Comparison", "Success diff [95% CI]", "Runs won/lost", "Sign p", "Events b/c", "McNemar p",
                 "Time diff (s)"],
                [[k.replace("_vs_", " vs ").replace("_", " "),
@@ -156,13 +159,13 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
                  _p(t["mcnemar_p_holm"]), f"{t['mean_time_diff_s']:+.0f}"] for k, t in prim.items()],
                "Diff and CI: mean of per-run differences, percentile bootstrap over runs (too narrow with few runs). "
                "McNemar pools events, which share habituation state within a run, so it overstates the evidence.")
-        llm_rows = [(f"{mode}, constrained enum", s) for p, s in summ.items() if s["llm_calls_per_event"]]
+        llm_rows = [(f"{_pol_label(p)}, {tag.rstrip('. ') or 'constrained enum'}", s) for p, s in summ.items() if s["llm_calls_per_event"]]
         probe = _load(results / "probe_3b" / f"e4_{mode}.json")
         if probe:
-            llm_rows.append((f"{mode}, unconstrained enum (1-run probe)", probe["summary"]["llm"]))
+            llm_rows.append(("LLM, unconstrained enum (pre-fix 1-run probe)", probe["summary"]["llm"]))
         if llm_rows:
-            _table(tables / f"e4_{mode}_llm.tex", f"LLM decisions, simulated ``{mode}'' setting.",
-                   f"tab:e4_{mode}_llm", ["LLM run", "Calls/event", "Invalid", "Fallback", "Early escalation"],
+            _table(tables / f"{name}_{mode}_llm.tex", f"{tag}LLM decisions, simulated ``{mode}'' setting.",
+                   f"tab:{name}_{mode}_llm", ["LLM run", "Calls/event", "Invalid", "Fallback", "Early escalation"],
                    [[name, f"{s['llm_calls_per_event']:.2f}", f"{s['invalid_action_rate']:.1%}",
                      f"{s['llm_fallback_rate']:.1%}", f"{s['early_escalation_rate']:.1%}"] for name, s in llm_rows],
                    "Invalid = the validator changed the LLM's choice. Fallback = the call failed and the bandit decided.")
@@ -207,8 +210,36 @@ def e4(results: Path, figs: Path, tables: Path) -> None:
         ax2.grid(axis="y", visible=False)
     handles, labels = axes[0][0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside right center")
-    _save(fig, figs / "e4_learning_curves.pdf")
-    _save(fig2, figs / "e4_time_in_field.pdf")
+    _save(fig, figs / f"{name}_learning_curves.pdf")
+    _save(fig2, figs / f"{name}_time_in_field.pdf")
+
+
+def e4_ablation(results: Path, tables: Path) -> None:
+    data = _load(results / "e4_ablation.json")
+    if not data:
+        return
+    t = data["tests"]
+    runs = max(v["runs"] for v in t.values())
+    _table(tables / "e4_ablation_tests.tex",
+           f"Position-bias ablation and hybrid, SIMULATED ``{data['mode']}'' setting. One Holm family of "
+           f"{len(t)} comparisons. Smallest possible sign-test p with {runs} runs: {2 / 2 ** runs:.2g}.",
+           "tab:e4_ablation_tests",
+           ["Comparison", "Runs", "Success diff [95% CI]", "Runs won/lost", "Sign p (Holm)", "Events b/c",
+            "Time diff (s)"],
+           [[k.replace("_vs_", " vs ").replace("_", " "), v["runs"],
+             f"{v['mean_success_diff']:+.3f} [{v['success_diff_ci95'][0]:+.3f}, {v['success_diff_ci95'][1]:+.3f}]",
+             f"{v['runs_won']}/{v['runs_lost']}", _p(v["sign_test_p_holm"]), f"{v['b']}/{v['c']}",
+             f"{v['mean_time_diff_s']:+.0f}"] for k, v in t.items()],
+           "Primary: sign test on per-run differences; CI: percentile bootstrap over runs (too narrow with few "
+           "runs). Events b/c (McNemar counts) are descriptive only. Ordered vs shuffled uses the repeats both have.")
+    _table(tables / "e4_position.tex",
+           "How often the LLM picked the first option it was shown, SIMULATED. Chance = mean of 1/options shown.",
+           "tab:e4_position", ["Run", "Answers", "First option", "Chance", "Multi-option answers", "First option",
+                               "Chance"],
+           [[k.replace("_", " "), s["answers"], f"{s['first_position_rate']:.1%}", f"{s['chance']:.1%}",
+             s["multi_option_answers"], f"{s['multi_first_position_rate']:.1%}", f"{s['multi_chance']:.1%}"]
+            for k, s in data["position"].items()],
+           "The last three columns drop calls that showed one option, which are first by construction.")
 
 
 def e4_grid(results: Path, figs: Path, tables: Path) -> None:
@@ -372,7 +403,9 @@ def main(argv: list[str] | None = None, results: str = "results", paper: str = "
     e1(res, figs, tables)
     e2(res, figs, tables)
     e3(res, tables)
-    e4(res, figs, tables)
+    e4(res, figs, tables, tag="Ordered options (773ad66). ")
+    e4(res / "e4_shuffle", figs, tables, "e4_shuffled", "Shuffled options. ")
+    e4_ablation(res, tables)
     e4_grid(res, figs, tables)
     e5(res, figs, tables)
     e6(res, tables)
