@@ -10,6 +10,7 @@
                 so it can follow habituation, which a stationary bandit can't (T4's E4 note)
   llm         - LLM with an enum-constrained action, given behaviour from the VLM, attempts so far
                 and outcome memory; falls back to bandit on any failure.
+  llm_bandit  - llm plus each legal sound's Beta posterior mean, the bandit's own estimate (hybrid)
 All policies see the same PolicyContext and go through validators.validate().
 """
 from __future__ import annotations
@@ -143,20 +144,37 @@ class LLMPolicy(Policy):
     name = "llm"
 
     def __init__(self, client: LLMClient, fallback: Policy | None = None,
-                 decision_log: str | Path | None = None, constrain_enum: bool = True):
+                 decision_log: str | Path | None = None, constrain_enum: bool = True,
+                 shuffle_options: bool = True, seed: int = 42):
         self.client = client
         self.fallback = fallback or BanditPolicy()
         # True: the schema enum holds only legal actions (validators.legal_actions), so a tried or
         # cooling-down sound can't be chosen. False: every allowed sound + escalate, as in T4's probe.
         self.constrain_enum = constrain_enum
+        # E4 (773ad66): 3b chose the FIRST legal sound in species.yaml order in 75% of 4276 calls, i.e. it
+        # acted as rule_chain. Shuffling the shown order per call removes that order as a signal.
+        self.shuffle_options = shuffle_options
+        self.seed = seed  # agent.seed; with event id and attempt it fixes the shown order
         self.decision_log = Path(decision_log) if decision_log else None  # JSONL, one line per decision
         self._trace: dict[str, Any] = {}
 
+    def order(self, ctx: PolicyContext) -> list[str]:
+        """Allowed sounds in the order shown this call: species.yaml order, or a shuffle that is the
+        same for the same (seed, event id, attempt), so a rerun shows the same order."""
+        sounds = list(ctx.allowed)
+        if self.shuffle_options:
+            random.Random(f"{self.seed}:{ctx.event_id}:{ctx.attempt_no}").shuffle(sounds)
+        return sounds
+
     def enum(self, ctx: PolicyContext) -> list[str]:
-        return legal_actions(ctx.validation()) if self.constrain_enum else ctx.allowed + [ESCALATE]
+        order = self.order(ctx)
+        if not self.constrain_enum:
+            return order + [ESCALATE]
+        legal = legal_actions(ctx.validation())
+        return [s for s in order if s in legal] + ([ESCALATE] if ESCALATE in legal else [])
 
     def context_json(self, ctx: PolicyContext) -> dict[str, Any]:
-        """Same keys every time, and every allowed sound always listed in the same order, so a
+        """Same keys every time, and every allowed sound always listed (in the shown order), so a
         sound with no trials reads as "no evidence" instead of being absent."""
         v = ctx.validation()
         return {
@@ -169,7 +187,7 @@ class LLMPolicy(Policy):
             "history": {s: {"trials": ctx.stats.get(s, {}).get("trials", 0),
                             "success_rate": ctx.stats.get(s, {}).get("success_rate"),
                             "recent": ctx.stats.get(s, {}).get("recent", [])}
-                        for s in ctx.allowed},
+                        for s in self.order(ctx)},
         }
 
     def propose(self, ctx):
@@ -181,6 +199,8 @@ class LLMPolicy(Policy):
         self._trace = {"provider": self.client.name, "model": res.model,
                        "seed": getattr(self.client, "seed", None),  # only Ollama sends one
                        "constrain_enum": self.constrain_enum, "enum": allowed,
+                       "shuffle_options": self.shuffle_options, "shown_order": allowed,
+                       "chosen_position": allowed.index(proposed) if in_enum else None,  # 0 = first shown
                        "system": SYSTEM_POLICY, "prompt": prompt,
                        "raw_response": res.raw, "llm_error": res.error, "llm_latency_s": res.latency_s,
                        "proposed": proposed, "llm_failed": res.data is None,
@@ -204,6 +224,7 @@ class LLMPolicy(Policy):
         used_fallback = t["llm_failed"] or t["out_of_enum"]
         if used_fallback:  # so results never credit the LLM with a decision the bandit made
             d.source = f"llm_fallback_{self.fallback.name}"
+        d.shown_position = t["chosen_position"]
         self._log({"ts": time.time(), "event_id": ctx.event_id, "attempt": ctx.attempt_no + 1, **t,
                    "validator_changed": bool(d.warnings) and not used_fallback,
                    "final_action": d.action, "source": d.source, "reason": d.reason, "warnings": d.warnings})
@@ -220,6 +241,20 @@ class LLMPolicy(Policy):
             log.warning("Could not write decision log: %s", exc)
 
 
+class LLMBanditPolicy(LLMPolicy):
+    """Hybrid: the llm prompt plus, per legal sound, the posterior mean of Beta(1+successes, 1+failures)
+    from the same outcome memory the bandit samples. Same enum, shuffle, validator and fallback."""
+    name = "llm_bandit"
+
+    def context_json(self, ctx):
+        out = super().context_json(ctx)
+        for s, h in out["history"].items():
+            if s in out["allowed_actions"]:
+                st = ctx.stats.get(s, {})
+                h["posterior_mean"] = round((1 + st.get("successes", 0)) / (2 + st.get("trials", 0)), 3)
+        return out
+
+
 def decision_log_summary(path: str | Path) -> dict[str, dict[str, Any]]:
     """Per model, from the JSONL. invalid_action_rate is over the answers the LLM actually gave:
     outside the enum, or changed by validate() (already tried, on cooldown). Failed calls are counted
@@ -229,19 +264,25 @@ def decision_log_summary(path: str | Path) -> dict[str, dict[str, Any]]:
         if not line.strip():
             continue
         r = json.loads(line)
-        s = out.setdefault(r["model"], {"decisions": 0, "llm_failed": 0, "out_of_enum": 0, "validator_changed": 0})
+        s = out.setdefault(r["model"], {"decisions": 0, "llm_failed": 0, "out_of_enum": 0, "validator_changed": 0,
+                                        "in_enum_answers": 0, "first_position": 0})
         s["decisions"] += 1
         for key in ("llm_failed", "out_of_enum", "validator_changed"):
             s[key] += bool(r[key])
+        if r.get("chosen_position") is not None:  # older logs (before 2026-11-14) don't have it
+            s["in_enum_answers"] += 1
+            s["first_position"] += r["chosen_position"] == 0
     for s in out.values():
         answers = s["decisions"] - s["llm_failed"]
         s["invalid_action_rate"] = (s["out_of_enum"] + s["validator_changed"]) / answers if answers else None
+        s["first_position_rate"] = s["first_position"] / s["in_enum_answers"] if s["in_enum_answers"] else None
     return out
 
 
 def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = None,
                  cfg: Any = None) -> Policy:
-    """cfg (a Config) only supplies agent.policy.constrain_enum; without it the default (true) holds."""
+    """cfg (a Config) supplies agent.policy.constrain_enum, agent.policy.shuffle_options and agent.seed;
+    without it the defaults (true, true, 42) hold."""
     if kind == "fixed":
         return FixedPolicy()
     if kind == "random":
@@ -252,9 +293,11 @@ def build_policy(kind: str, client: LLMClient | None = None, seed: int | None = 
         return BanditPolicy(seed)
     if kind == "bandit_sw":
         return SlidingWindowBanditPolicy(seed)
-    if kind == "llm":
+    if kind in ("llm", "llm_bandit"):
         if client is None:
-            raise ValueError("llm policy needs an LLM client")
-        constrain = cfg.get("agent.policy.constrain_enum", True) if cfg is not None else True
-        return LLMPolicy(client, BanditPolicy(seed), constrain_enum=bool(constrain))
+            raise ValueError(f"{kind} policy needs an LLM client")
+        get = cfg.get if cfg is not None else (lambda key, default: default)
+        cls = LLMPolicy if kind == "llm" else LLMBanditPolicy
+        return cls(client, BanditPolicy(seed), constrain_enum=bool(get("agent.policy.constrain_enum", True)),
+                   shuffle_options=bool(get("agent.policy.shuffle_options", True)), seed=int(get("agent.seed", 42)))
     raise ValueError(f"unknown policy {kind}")

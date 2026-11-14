@@ -33,7 +33,7 @@ def _enum_sent(constrain):
     enums = []
     client = MockClient(responder=lambda p, s, n: (enums.append(s["properties"]["action"]["enum"]),
                                                    {"action": "c", "reason": "r", "confidence": 0.5})[1])
-    LLMPolicy(client, constrain_enum=constrain).decide(_ctx(tried=("a",), last_played_at={"b": 95.0}, now=100.0))
+    LLMPolicy(client, constrain_enum=constrain, shuffle_options=False).decide(_ctx(tried=("a",), last_played_at={"b": 95.0}, now=100.0))
     return enums[0]
 
 
@@ -54,7 +54,7 @@ def test_constrained_never_lets_a_tried_sound_reach_the_validator(tmp_path, monk
     d = LLMPolicy(_always("a"), decision_log=path).decide(_ctx(tried=("a",)))
     r = json.loads(path.read_text(encoding="utf-8"))
     assert "a" not in seen and d.action in ("b", "c")
-    assert r["out_of_enum"] is True and r["constrain_enum"] is True and r["enum"] == ["b", "c"]
+    assert r["out_of_enum"] is True and r["constrain_enum"] is True and sorted(r["enum"]) == ["b", "c"]
 
 
 def test_no_legal_sound_means_escalate_without_a_call():

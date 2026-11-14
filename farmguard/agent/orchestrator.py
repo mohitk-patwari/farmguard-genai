@@ -65,6 +65,8 @@ class EventResult:
     effective_species: str = ""          # what sounds, policy, alert and memory used
     overridden: bool = False             # a confident VLM species replaced the detector's
     possible_false_alarm: bool = False   # the VLM saw no animal, with high confidence
+    species_uncertain: bool = False      # detector and VLM disagree and one says an immediate-escalation species
+    effective_by_threshold: dict[str, str] = field(default_factory=dict)  # none/high/medium -> species (E2)
 
 
 CONF_RANK = {"low": 0, "medium": 1, "high": 2}
@@ -88,6 +90,8 @@ class AgentWorker:
         self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vlm")
         self._thread = threading.Thread(target=self._loop, daemon=True, name="agent")
         self._last_played: dict[str, float] = {}
+        self._llm_answers = 0     # in-enum LLM answers, and how many picked the first shown option
+        self._first_position = 0
         self.first_sound_cache: dict[str, str] | None = None  # set by build_system (shared with fast path)
         self._jsonl = cfg.path("logging.events_jsonl") if cfg.get("logging.events_jsonl") else None
         if isinstance(policy, LLMPolicy) and not policy.decision_log and cfg.get("agent.policy.decision_log"):
@@ -125,17 +129,38 @@ class AgentWorker:
                 "retreat_checks": sum(a.vlm_status is not None or a.vlm_error is not None for a in attempts),
                 "retreat_failed": sum(a.vlm_error is not None for a in attempts),
                 "species_overridden": sum(r.overridden for r in self.results),
-                "possible_false_alarm": sum(r.possible_false_alarm for r in self.results)}
+                "possible_false_alarm": sum(r.possible_false_alarm for r in self.results),
+                "species_uncertain": sum(r.species_uncertain for r in self.results)}
 
-    def effective_species(self, detector: str, report: VLMReport | None) -> tuple[str, bool, bool]:
+    def run_counts(self) -> dict[str, Any]:
+        """For run results: windows cut short by the end of the clip, and the LLM's position bias."""
+        return {"truncated_windows": sum(a.status == RetreatStatus.TRUNCATED.value
+                                         for r in self.results for a in r.attempts),
+                "llm_answers": self._llm_answers,
+                "first_position_rate": self._first_position / self._llm_answers if self._llm_answers else None}
+
+    def _decide(self, ctx: PolicyContext) -> PolicyDecision:
+        d = self.policy.decide(ctx)
+        if d.shown_position is not None:
+            self._llm_answers += 1
+            self._first_position += d.shown_position == 0
+        return d
+
+    def effective_species(self, detector: str, report: VLMReport | None,
+                          min_confidence: str | None = None) -> tuple[str, bool, bool]:
         """(species, overridden, possible_false_alarm). The detector's label was wrong on every event of
         T1's boar clip, so a confident VLM answer wins (agent.vlm.override_*). A failed VLM call,
-        'unclassifiable', 'other_animal' or a doubtful answer keeps the detector's label."""
-        if report is None or report.error or not self.cfg.get("agent.vlm.override_species", True):
+        'unclassifiable', 'other_animal' or a doubtful answer keeps the detector's label.
+        min_confidence given: use that threshold whatever the config (logged per event for E2)."""
+        if report is None or report.error:
             return detector, False, False
+        if min_confidence is None:
+            if not self.cfg.get("agent.vlm.override_species", True):
+                return detector, False, False
+            min_confidence = str(self.cfg.get("agent.vlm.override_min_confidence", "high"))
         if report.species == "none" and report.confidence == "high":
             return detector, False, True
-        need = CONF_RANK.get(str(self.cfg.get("agent.vlm.override_min_confidence", "high")), 2)
+        need = CONF_RANK.get(min_confidence, 2)
         if (report.species in self.cfg.species and report.species != detector
                 and CONF_RANK.get(report.confidence, -1) >= need):
             return report.species, True, False
@@ -182,6 +207,15 @@ class AgentWorker:
         if overridden:
             log.info("Event %s: VLM says %s (%s), detector said %s: using %s", ev.event_id,
                      species, report.confidence, ev.species, species)
+        by_threshold = {"none": ev.species, **{c: self.effective_species(ev.species, report, c)[0]
+                                               for c in ("high", "medium")}}
+        # Smoke test 2: detector "elephant", VLM "wild boar" (medium). Elephant may go straight to the farmer,
+        # so a disputed elephant must not do that on the detector's word alone, and the farmer is told both.
+        immediate = self._immediate()
+        disagree = (report is not None and not report.error
+                    and report.species not in (ev.species, "unclassifiable"))
+        uncertain = disagree and (ev.species in immediate or report.species in immediate)
+        event_immediate = () if uncertain and not overridden else immediate
         info = self.cfg.species[species]
         label = species.replace("_", " ")
         # VLM saw no animal and neither does the retreat check: stop, and record nothing in outcome
@@ -193,7 +227,8 @@ class AgentWorker:
 
         status = rr.status
         escalated = False
-        while not quiet and status not in (RetreatStatus.GONE, RetreatStatus.LEAVING):
+        # TRUNCATED: the clip or stream ended, so nothing more can be observed (or learned)
+        while not quiet and status not in (RetreatStatus.GONE, RetreatStatus.LEAVING, RetreatStatus.TRUNCATED):
             now = self.buffer.latest_time
             ctx = PolicyContext(species=species, species_label=label, allowed=info.allowed_sounds,
                                 default_sound=info.default_sound, tried_this_event=list(tried),
@@ -203,8 +238,8 @@ class AgentWorker:
                                 last_played_at=dict(self._last_played), now=now,
                                 sound_cooldown_s=self.cfg.get("agent.policy.sound_cooldown_s", 20),
                                 event_id=ev.event_id,
-                                immediate_escalation_species=self._immediate())
-            decision: PolicyDecision = self.policy.decide(ctx)
+                                immediate_escalation_species=event_immediate)
+            decision: PolicyDecision = self._decide(ctx)
             if decision.action == ESCALATE:
                 escalated = True
                 log.info("Event %s: escalate to farmer (%s)", ev.event_id, decision.reason)
@@ -224,7 +259,8 @@ class AgentWorker:
             farmer = self.notifier.deliver(note, note, "false_alarm_note")
         else:
             farmer = self.notifier.send(self.notifier.build_summary(
-                species, ev.wall_time, [a.sound for a in attempts], final, len(attempts), count, behaviour))
+                species, ev.wall_time, [a.sound for a in attempts], final, len(attempts), count, behaviour,
+                species_check=(ev.species, report.species) if uncertain else None))
         result = EventResult(event=ev.to_dict(), vlm=asdict(report) if report else None,
                              attempts=attempts, final_status=final, escalated=escalated,
                              farmer=farmer, agent_seconds=time.perf_counter() - t_start,
@@ -232,7 +268,8 @@ class AgentWorker:
                              detector_species=ev.species, vlm_species=report.species if report else None,
                              vlm_confidence=report.confidence if report else None,
                              effective_species=species, overridden=overridden,
-                             possible_false_alarm=false_alarm)
+                             possible_false_alarm=false_alarm, species_uncertain=uncertain,
+                             effective_by_threshold=by_threshold)
         self.memory.add_event(event_id=ev.event_id, wall_time=ev.wall_time, video_time=ev.video_time,
                               species=species, label=ev.label, zone=ev.zone,
                               track_id=ev.track_id,
@@ -243,7 +280,8 @@ class AgentWorker:
                               farmer_message=farmer["message"],
                               extra={"vlm_note": report.note if report else None,
                                      "detector_species": ev.species, "overridden": overridden,
-                                     "possible_false_alarm": false_alarm})
+                                     "possible_false_alarm": false_alarm, "species_uncertain": uncertain,
+                                     "effective_by_threshold": by_threshold})
         self._write_jsonl(result)
         if not quiet:
             self._update_first_sound(ev, species, bucket, max_attempts)
@@ -257,7 +295,7 @@ class AgentWorker:
 
     def _update_first_sound(self, ev: IntrusionEvent, species: str, bucket: str, max_attempts: int) -> None:
         """Off the critical path: pick the first sound for this species' NEXT visit."""
-        if self.first_sound_cache is None or self.policy.name not in ("llm", "bandit", "bandit_sw", "random"):
+        if self.first_sound_cache is None or self.policy.name in ("fixed", "rule_chain"):
             return
         info = self.cfg.species[species]
         ctx = PolicyContext(species=species, species_label=species.replace("_", " "),
@@ -267,7 +305,7 @@ class AgentWorker:
                             sound_cooldown_s=0, event_id=ev.event_id,
                             immediate_escalation_species=self._immediate())
         try:
-            rec = self.policy.decide(ctx).action
+            rec = self._decide(ctx).action
             if rec in info.allowed_sounds:
                 self.first_sound_cache[species] = rec
         except Exception:
@@ -275,7 +313,7 @@ class AgentWorker:
 
     def _log_attempt(self, ev: IntrusionEvent, species: str, n: int, sound: str, source: str, reason: str,
                      rr: RetreatResult, bucket: str, latency: float = 0.0, remember: bool = True) -> AttemptLog:
-        if remember:
+        if remember and rr.status != RetreatStatus.TRUNCATED:  # no verdict, so no outcome to learn from
             self.memory.add_attempt(ev.event_id, n, species, sound, source, reason, rr.status.value,
                                     rr.time_to_leave_s, rr.tracker_status.value,
                                     rr.vlm_status.value if rr.vlm_status else None, bucket=bucket)

@@ -22,11 +22,12 @@ log = logging.getLogger(__name__)
 
 STATUS_WORDS = {
     "hi": {"gone": "खेत से चला गया", "leaving": "खेत से जा रहा था", "still_present": "अभी भी खेत में है",
-           "uncertain": "स्थिति साफ़ नहीं है"},
+           "uncertain": "स्थिति साफ़ नहीं है", "truncated": "स्थिति साफ़ नहीं है"},
     "mr": {"gone": "शेतातून निघून गेले", "leaving": "शेतातून जात होते", "still_present": "अजूनही शेतात आहे",
-           "uncertain": "स्थिती स्पष्ट नाही"},
+           "uncertain": "स्थिती स्पष्ट नाही", "truncated": "स्थिती स्पष्ट नाही"},
     "en": {"gone": "left the field", "leaving": "was leaving the field",
-           "still_present": "is still in the field", "uncertain": "status is unclear"},
+           "still_present": "is still in the field", "uncertain": "status is unclear",
+           "truncated": "status is unclear"},  # truncated: the video ended before the check could see
 }
 
 
@@ -38,22 +39,30 @@ SOUND_NAMES = {
            "gunshot": "फटाक्याचा आवाज", "dog_bark": "कुत्र्याचा आवाज", "boar_alarm": "डुकराचा आवाज",
            "siren": "सायरन", "drum_beat": "ढोल", "human_shout": "माणसाच्या ओरडण्याचा आवाज"},
 }
-# Words for animals and sounds the alert must not name unless they happened. Not exhaustive.
-OTHER_WORDS = {
-    "hi": {"wild_boar": ["सूअर", "सूअरों"], "monkey": ["बंदरों"], "elephant": ["हाथियों"], "nilgai": ["नीलगायों"],
-           "stray_cattle": ["गाय", "गायें", "गायों", "बैल", "भैंस"]},
-    "mr": {"wild_boar": ["डुक्कर", "डुकरे"], "monkey": ["माकडे"], "elephant": ["हत्ती"], "nilgai": [],
-           "stray_cattle": ["गाय", "गाई", "बैल", "म्हैस"]},
+# Stems for the grounding check (validators.alert_problems): any stem names the fact, so a reworded
+# sound name passes. The same stems name what the alert must NOT mention. Not exhaustive; native-speaker check due.
+STEMS = {
+    "hi": {"species": {"wild_boar": ["सूअर", "सुअर"], "nilgai": ["नीलगाय"], "monkey": ["बंदर"],
+                       "elephant": ["हाथी"], "stray_cattle": ["पशु", "गाय", "बैल", "भैंस", "मवेशी"]},
+           "sounds": {"bee_swarm": ["मधुमक्ख"], "tiger_roar": ["बाघ"], "leopard_growl": ["तेंदु"],
+                      "gunshot": ["पटाख", "बंदूक", "गोली"], "dog_bark": ["कुत्त"], "boar_alarm": ["सूअर", "सुअर"],
+                      "siren": ["सायरन"], "drum_beat": ["ढोल"], "human_shout": ["चिल्ला", "आदमी", "इंसान"]},
+           "status": {"left": ["चला गया", "चले गए", "चली गई", "जा रहा", "जा रहे", "जा रही", "निकल रहा"],
+                      "still": ["अभी भी खेत में", "खेत में है", "खेत में ही"],
+                      "unclear": ["साफ नहीं", "पता नहीं"]}},
+    "mr": {"species": {"wild_boar": ["डुक्कर", "डुकरे"], "nilgai": ["नीलगाय", "रोही"], "monkey": ["माकड"],
+                       "elephant": ["हत्ती"], "stray_cattle": ["जनावर", "गाय", "गाई", "बैल", "म्हैस"]},
+           "sounds": {"bee_swarm": ["मधमाश"], "tiger_roar": ["वाघ"], "leopard_growl": ["बिबट"],
+                      "gunshot": ["फटाक", "बंदूक"], "dog_bark": ["कुत्र"], "boar_alarm": ["डुकरा", "डुक्कराचा"],
+                      "siren": ["सायरन"], "drum_beat": ["ढोल"], "human_shout": ["ओरड", "माणस", "माणूस"]},
+           "status": {"left": ["निघून गेल", "जात होत", "जात आहे"], "still": ["अजूनही शेतात", "शेतात आहे"],
+                      "unclear": ["स्पष्ट नाही"]}},
+    "en": {"species": {}, "sounds": {},  # English adds species aliases and sound labels from the config
+           "status": {"left": ["left the field", "has left", "leaving"], "still": ["still in the field", "still there"],
+                      "unclear": ["unclear", "not clear"]}},
 }
-SOUND_WORDS = {
-    "hi": {"bee_swarm": ["मधुमक्खी", "मधुमक्खियों"], "tiger_roar": ["बाघ"], "leopard_growl": ["तेंदुआ", "तेंदुए"],
-           "gunshot": ["पटाखा", "पटाखे", "बंदूक", "गोली"], "dog_bark": ["कुत्ता", "कुत्ते", "कुत्तों"],
-           "boar_alarm": [], "siren": ["सायरन"], "drum_beat": ["ढोल"], "human_shout": ["आदमी", "इंसान"]},
-    "mr": {"bee_swarm": ["मधमाशी", "मधमाश्यांचा", "मधमाश्या"], "tiger_roar": ["वाघ", "वाघाचा"],
-           "leopard_growl": ["बिबट्या", "बिबट्याचा"], "gunshot": ["फटाका", "फटाके", "फटाक्याचा", "बंदूक"],
-           "dog_bark": ["कुत्रा", "कुत्र्याचा", "कुत्रे"], "boar_alarm": [], "siren": ["सायरन"], "drum_beat": ["ढोल"],
-           "human_shout": ["माणूस", "माणसाच्या"]},
-}
+STATUS_FAMILY = {"gone": "left", "leaving": "left", "still_present": "still", "uncertain": "unclear",
+                 "truncated": "unclear"}
 NUMBER_WORDS = {
     "hi": {"एक": 1, "दो": 2, "तीन": 3, "चार": 4, "पांच": 5, "पाँच": 5, "छह": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10},
     "mr": {"एक": 1, "दोन": 2, "तीन": 3, "चार": 4, "पाच": 5, "सहा": 6, "सात": 7, "आठ": 8, "नऊ": 9, "दहा": 10},
@@ -95,23 +104,39 @@ FALSE_ALARM_NOTES = {  # fixed text, no LLM: there is nothing to report but a do
 }
 
 
+# Added after the alert (LLM or template) when detector and VLM disagree about an immediate-escalation
+# species, e.g. detector elephant vs camera check wild boar (smoke test 2). Fixed text: it is the safety part.
+UNCERTAIN_NOTES = {
+    "hi": "जानवर पक्का नहीं है (डिटेक्टर: {detector}, कैमरा जाँच: {vlm})।",
+    "mr": "प्राणी नक्की नाही (डिटेक्टर: {detector}, कॅमेरा तपासणी: {vlm}).",
+    "en": "Species uncertain (detector: {detector}, camera check: {vlm}).",
+}
+VLM_NON_SPECIES = {"none": {"hi": "कोई जानवर नहीं", "mr": "प्राणी नाही", "en": "no animal"},
+                   "other_animal": {"hi": "कोई और जानवर", "mr": "दुसरा प्राणी", "en": "another animal"}}
+
+
 def local_name(cfg: Config, species: str, language: str) -> str:
+    if species in VLM_NON_SPECIES:
+        return VLM_NON_SPECIES[species].get(language, VLM_NON_SPECIES[species]["en"])
     info = cfg.species.get(species)
     names = {"hi": info.hindi, "mr": info.marathi} if info else {}
     return names.get(language, species.replace("_", " "))
 
 
 class Notifier:
-    def __init__(self, cfg: Config, client: LLMClient | None):
+    def __init__(self, cfg: Config, client: LLMClient | None, fallback: LLMClient | None = None):
         self.cfg = cfg
-        self.client = client
+        self.client = client      # agent.notifier.provider, else the policy's client
+        self.fallback = fallback  # tried when `client` fails (e.g. Gemini down -> Ollama), then the template
         self.language = cfg.get("notifier.language", "hi")
         self.channels = cfg.get("notifier.channels", ["console"])
         self.voice = cfg.get("notifier.voice_note", True)
         self.sent: list[dict[str, Any]] = []
 
     def build_summary(self, species: str, wall_time: float, sounds: list[str], final_status: str,
-                      attempts: int, count: int, behaviour: str) -> dict[str, Any]:
+                      attempts: int, count: int, behaviour: str,
+                      species_check: tuple[str, str] | None = None) -> dict[str, Any]:
+        """species_check: (detector species, VLM species) when they disagree about a dangerous species."""
         local = local_name(self.cfg, species, self.language)
         labels = [self.cfg.sounds.get(s, {}).get("label", s) for s in sounds]
         names = SOUND_NAMES.get(self.language, {})
@@ -122,34 +147,46 @@ class Notifier:
                 "animal": species.replace("_", " "), "animal_local": local, "count": count,
                 "time": time.strftime("%H:%M", time.localtime(wall_time)),
                 "behaviour_when_seen": behaviour, "sounds_played": labels,
-                "attempts": attempts, "final_status": final_status}
+                "attempts": attempts, "final_status": final_status,
+                "species_note": (UNCERTAIN_NOTES.get(self.language, UNCERTAIN_NOTES["en"]).format(
+                    detector=local_name(self.cfg, species_check[0], self.language),
+                    vlm=local_name(self.cfg, species_check[1], self.language)) if species_check else None)}
 
     def _facts(self, summary: dict[str, Any], template: str) -> AlertFacts:
         lang = self.language
-        sound_names = SOUND_NAMES.get(lang, {})
-        species_words = OTHER_WORDS.get(lang, {})
-        other: list[str] = []
-        for key, info in self.cfg.species.items():
-            if key != summary["species"]:
-                other += [local_name(self.cfg, key, lang), *species_words.get(key, [])]
-                if lang not in NON_LATIN:
-                    other += info.aliases
-        for key in self.cfg.sounds:
-            if key not in summary["sound_ids"]:
-                other += [sound_names.get(key) or self.cfg.sounds[key].get("label", key),
-                          *SOUND_WORDS.get(lang, {}).get(key, [])]
-        return AlertFacts(summary["animal_local"], summary["count"], summary["attempts"], summary["sounds_local"],
-                          summary["status_local"], summary["time"], other, NUMBER_WORDS.get(lang, {}),
-                          max_chars=2 * len(template), latin_allowed=lang not in NON_LATIN)
+        st = STEMS.get(lang, STEMS["en"])
+        names = SOUND_NAMES.get(lang, {})
+
+        def species_stems(key: str) -> list[str]:
+            extra = [] if lang in NON_LATIN else [key.replace("_", " "), *self.cfg.species[key].aliases]
+            return [local_name(self.cfg, key, lang), *st["species"].get(key, []), *extra]
+
+        def sound_stems(key: str) -> list[str]:
+            return [names.get(key) or self.cfg.sounds.get(key, {}).get("label", key), *st["sounds"].get(key, [])]
+
+        family = STATUS_FAMILY.get(summary["final_status"], "unclear")
+        forbidden = [w for k in self.cfg.species if k != summary["species"] for w in species_stems(k)]
+        forbidden += [w for k in self.cfg.sounds if k not in summary["sound_ids"] for w in sound_stems(k)]
+        forbidden += [w for f, ws in st["status"].items() if f != family for w in ws]
+        return AlertFacts(species_stems(summary["species"]), summary["count"], summary["attempts"],
+                          [sound_stems(s) for s in summary["sound_ids"]],
+                          [summary["status_local"], *st["status"][family]], summary["time"], forbidden,
+                          NUMBER_WORDS.get(lang, {}), max_chars=2 * len(template), latin_allowed=lang not in NON_LATIN)
 
     def compose(self, summary: dict[str, Any]) -> tuple[str, str, str]:
         """Returns (message, voice_text, source). source is llm, template (no usable answer) or
         template_ungrounded (the LLM answered and its facts were wrong)."""
         template = template_message(summary, self.language)
-        if self.client is None:
+        res = None
+        for client in (self.client, self.fallback):
+            if client is None:
+                continue
+            res = client.generate_json(alert_prompt(summary, self.language), alert_schema())
+            log.info("alert provider=%s llm_latency_s=%.3f ok=%d", client.name, res.latency_s, res.data is not None)
+            if res.data is not None:
+                break
+        if res is None:
             return template, template, "template"
-        res = self.client.generate_json(alert_prompt(summary, self.language), alert_schema())
-        log.info("alert llm_latency_s=%.3f ok=%d", res.latency_s, res.data is not None)  # apart from policy calls
         data = res.data or {}
         message = str(data.get("message") or "").strip()
         if not message:
@@ -169,7 +206,10 @@ class Notifier:
             time=time.strftime("%H:%M", time.localtime(wall_time)), animal=animal)
 
     def send(self, summary: dict[str, Any]) -> dict[str, Any]:
-        return self.deliver(*self.compose(summary))
+        message, voice, source = self.compose(summary)
+        if summary.get("species_note"):  # outside the grounding check: fixed text, never from the LLM
+            message, voice = f"{message} {summary['species_note']}", f"{voice} {summary['species_note']}"
+        return self.deliver(message, voice, source)
 
     def deliver(self, message: str, voice_text: str, source: str) -> dict[str, Any]:
         out = {"message": message, "voice_text": voice_text, "source": source, "channels": []}

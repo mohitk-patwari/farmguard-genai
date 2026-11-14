@@ -27,7 +27,7 @@ def _policy(tmp_path, action="b"):
 
 def test_context_lists_every_sound_in_order_even_with_no_trials():
     ctx = _ctx(stats={"c": {"trials": 2, "successes": 1, "success_rate": 0.5, "recent": ["ok", "fail"]}})
-    hist = LLMPolicy(MockClient()).context_json(ctx)["history"]
+    hist = LLMPolicy(MockClient(), shuffle_options=False).context_json(ctx)["history"]
     assert list(hist) == ALLOWED
     assert hist["b"] == {"trials": 0, "success_rate": None, "recent": []}
     assert hist["c"]["success_rate"] == 0.5

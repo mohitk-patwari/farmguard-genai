@@ -67,6 +67,8 @@ class SimOutcome:
     llm_calls: int = 0
     llm_fallbacks: int = 0           # decisions the bandit made because the LLM failed
     invalid_actions: int = 0         # proposals the validator or enum check had to reject
+    first_position: int = 0          # in-enum LLM answers that picked the first option shown
+    position_answers: int = 0        # in-enum LLM answers (denominator of first_position_rate)
 
 
 @dataclass
@@ -172,6 +174,9 @@ def run_policy(cfg: Config, sim: dict[str, Any], policy: Policy, events: list[Si
         if isinstance(policy, LLMPolicy):
             row["llm_calls"] += 1
             row["llm_fallbacks"] += d.source.startswith("llm_fallback")
+            if d.shown_position is not None:  # an in-enum LLM answer: was it the first option shown?
+                row["position_answers"] += 1
+                row["first_position"] += d.shown_position == 0
         row["invalid_actions"] += "bad action" in d.reason or bool(d.warnings)
         return d
 
@@ -180,7 +185,7 @@ def run_policy(cfg: Config, sim: dict[str, Any], policy: Policy, events: list[Si
         first = first_cache.get(ev.species, info.default_sound) if adaptive_first else info.default_sound
         sounds, success, escalated, early = [first], False, False, False
         elapsed = 0.0
-        row = {"llm_calls": 0, "llm_fallbacks": 0, "invalid_actions": 0}
+        row = {"llm_calls": 0, "llm_fallbacks": 0, "invalid_actions": 0, "first_position": 0, "position_answers": 0}
         while True:
             snd = sounds[-1]
             p = flee_probability(world, sim, ev, snd)
@@ -205,7 +210,8 @@ def run_policy(cfg: Config, sim: dict[str, Any], policy: Policy, events: list[Si
                                 max_attempts=tm["max_attempts"], hour_bucket=ev.bucket,
                                 behaviour="eating" if ev.eating else "moving_through", count=ev.count,
                                 stats=memory.sound_stats(ev.species, ev.bucket, window=window), now=elapsed,
-                                sound_cooldown_s=0, immediate_escalation_species=immediate)
+                                sound_cooldown_s=0, immediate_escalation_species=immediate,
+                                event_id=f"r{run}e{i}")  # seeds the LLM's option shuffle
             d = decide(ctx, row)
             if d.action == ESCALATE:
                 escalated, early = True, True
@@ -218,7 +224,7 @@ def run_policy(cfg: Config, sim: dict[str, Any], policy: Policy, events: list[Si
                                  tried_this_event=[], attempt_no=0, max_attempts=tm["max_attempts"],
                                  hour_bucket=ev.bucket, behaviour="unclear",
                                  stats=memory.sound_stats(ev.species, ev.bucket, window=window), sound_cooldown_s=0,
-                                 immediate_escalation_species=immediate)
+                                 immediate_escalation_species=immediate, event_id=f"r{run}e{i}")
             rec = decide(ctx0, row).action
             if rec != ESCALATE:
                 first_cache[ev.species] = rec
@@ -256,6 +262,8 @@ def summarize(outcomes: list[SimOutcome]) -> dict[str, dict[str, float]]:
             "llm_calls_per_event": calls / n,
             "llm_fallback_rate": sum(o.llm_fallbacks for o in os_) / calls if calls else 0.0,
             "invalid_action_rate": sum(o.invalid_actions for o in os_) / calls if calls else 0.0,
+            "first_position_rate": (sum(o.first_position for o in os_) / answers
+                                    if (answers := sum(o.position_answers for o in os_)) else None),
         }
     return res
 
@@ -294,11 +302,13 @@ _DECISION_CODE = ["farmguard/sim/simulator.py", "farmguard/agent/policy.py", "fa
 
 
 def _llm_run_path(cache_dir: Path, sim: dict[str, Any], client: Any, run: int,
-                  constrain_enum: bool = True, name: str = "llm") -> Path:
+                  constrain_enum: bool = True, name: str = "llm", shuffle_options: bool = True) -> Path:
     h = hashlib.sha1(json.dumps({k: v for k, v in sim.items() if k != "sensitivity"},
                                 sort_keys=True).encode())
     h.update(f"{client.name}:{client.model}:{client.temperature}:{getattr(client, 'seed', None)}".encode())
     h.update(f"constrain_enum={bool(constrain_enum)}".encode())
+    if not shuffle_options:  # absent from keys made before 2026-11-14; the code hash changed then anyway
+        h.update(b"shuffle_options=False")
     for rel in _DECISION_CODE:
         h.update((ROOT / rel).read_bytes().replace(b"\r\n", b"\n"))
     return cache_dir / h.hexdigest()[:16] / f"{name}_r{run}.json"
@@ -317,7 +327,8 @@ def run_all(cfg: Config, sim: dict[str, Any], policies: list[str], llm_client=No
             pol = build_policy(name, llm_client, seed=seed, cfg=cfg)
             cached = None
             if isinstance(pol, LLMPolicy) and cache_dir is not None:
-                cached = _llm_run_path(Path(cache_dir), sim, llm_client, r, pol.constrain_enum, name)
+                cached = _llm_run_path(Path(cache_dir), sim, llm_client, r, pol.constrain_enum, name,
+                                       pol.shuffle_options)
                 if cached.exists():
                     outcomes += [SimOutcome(**o) for o in json.loads(cached.read_text(encoding="utf-8"))]
                     continue

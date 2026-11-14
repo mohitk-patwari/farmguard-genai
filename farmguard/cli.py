@@ -43,11 +43,14 @@ def cmd_run(args) -> None:
     src.release()
     print(json.dumps({"events": len(system.fast.events),
                       "vlm": system.agent.vlm_counts() if system.agent else None,
+                      "agent": system.agent.run_counts() if system.agent else None,
                       "stage_timing_ms": system.fast.timer.summary(),
                       "results": [{"event": r.event["event_id"], "final": r.final_status,
                                    "detector_species": r.detector_species, "vlm_species": r.vlm_species,
                                    "vlm_confidence": r.vlm_confidence, "effective_species": r.effective_species,
                                    "overridden": r.overridden, "possible_false_alarm": r.possible_false_alarm,
+                                   "species_uncertain": r.species_uncertain,
+                                   "effective_by_threshold": r.effective_by_threshold,
                                    "sounds": [a.sound for a in r.attempts],
                                    "farmer": (r.farmer or {}).get("message")}
                                   for r in (system.agent.results if system.agent else [])]},

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from farmguard.agent.clip_builder import MAX_IMAGES, MAX_SIDE
-from farmguard.agent.llm.providers import build_client
+from farmguard.agent.llm.providers import build_client, build_optional_client
 from farmguard.agent.memory import Memory
 from farmguard.agent.notifier import Notifier
 from farmguard.agent.orchestrator import AgentWorker, EventResult
@@ -54,6 +54,11 @@ def build_system(cfg: Config, detector: Detector | None = None, llm_client=None,
         client = llm_client or build_client(cfg, "vlm")
         policy_client = llm_client or (client if cfg.get("agent.llm_model") == cfg.get("agent.vlm_model")
                                        else build_client(cfg, "llm"))
+        alert_provider = cfg.get("agent.notifier.provider")
+        alert_client = (build_optional_client(cfg, alert_provider) if not llm_client and alert_provider
+                        and alert_provider != cfg.get("agent.provider") else None)
+        notifier = (Notifier(cfg, alert_client, fallback=policy_client) if alert_client
+                    else Notifier(cfg, policy_client))
         agent = AgentWorker(
             cfg, buffer, alarm, memory,
             vlm=VLMChecker(cfg, client),
@@ -61,9 +66,10 @@ def build_system(cfg: Config, detector: Detector | None = None, llm_client=None,
                                    cfg.get("agent.retreat.gone_frames", 15),
                                    cfg.get("agent.retreat.use_vlm", True),
                                    n_vlm_frames=cfg.get("agent.clip.max_images", MAX_IMAGES),
-                                   max_side=cfg.get("agent.clip.max_side", MAX_SIDE)),
+                                   max_side=cfg.get("agent.clip.max_side", MAX_SIDE),
+                                   min_frames=cfg.get("agent.retreat.min_frames", 10)),
             policy=build_policy(cfg.get("agent.policy.type", "llm"), policy_client, cfg=cfg),
-            notifier=Notifier(cfg, policy_client), on_result=on_result).start()
+            notifier=notifier, on_result=on_result).start()
     fast = FastPath(cfg, detector or build_detector(cfg), zones, alarm, buffer,
                     agent.queue if agent else None, latency, on_frame)
     if agent and cfg.get("agent.adaptive_first_sound", True):

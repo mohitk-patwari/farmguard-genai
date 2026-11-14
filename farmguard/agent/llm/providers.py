@@ -187,10 +187,28 @@ def default_mock_responder(prompt: str, schema: dict, n_images: int) -> dict:
     return out
 
 
-def build_client(cfg, role: str = "vlm") -> LLMClient:
-    """role = "vlm" (images) or "llm" (text). Both use agent.provider. agent.models.<provider> wins
-    over vlm_model / llm_model, so --provider gemini does not send Gemini an Ollama model tag."""
-    provider = cfg.get("agent.provider", "ollama")
+API_KEYS = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+
+
+def build_optional_client(cfg, provider: str, role: str = "llm") -> LLMClient | None:
+    """A client for `provider`, or None (with a warning) when its API key is missing or it can't be built,
+    so the caller falls back to its own client. Used for agent.notifier.provider."""
+    key = API_KEYS.get(provider)
+    if key and not os.getenv(key):
+        log.warning("%s has no %s: farmer alerts use the agent's own model", provider, key)
+        return None
+    try:
+        return build_client(cfg, role, provider)
+    except Exception as exc:  # SDK not installed, bad config
+        log.warning("Could not build %s client for alerts (%s): using the agent's own model", provider, exc)
+        return None
+
+
+def build_client(cfg, role: str = "vlm", provider: str | None = None) -> LLMClient:
+    """role = "vlm" (images) or "llm" (text). Both use agent.provider unless `provider` is given.
+    agent.models.<provider> wins over vlm_model / llm_model, so --provider gemini does not send Gemini
+    an Ollama model tag."""
+    provider = provider or cfg.get("agent.provider", "ollama")
     model = (cfg.get(f"agent.models.{provider}.{role}") or cfg.get(f"agent.{role}_model")
              or cfg.get("agent.vlm_model"))
     kw = {"temperature": cfg.get("agent.temperature", 0.2), "timeout_s": cfg.get("agent.timeout_s", 120),

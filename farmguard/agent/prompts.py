@@ -138,6 +138,9 @@ def policy_prompt(context: dict[str, Any]) -> str:
         "- Choose 'escalate_farmer' only if no allowed sound is likely to work.",
         "- Sounds in on_cooldown or tried_this_event will be rejected.",
         "- success_rate is null for a sound with no trials; recent is newest first.",
+        *([("- posterior_mean is the mean of Beta(1+successes, 1+failures) for that sound: the success "
+            "estimate a Thompson-sampling bandit uses.")]
+          if any("posterior_mean" in h for h in context["history"].values()) else []),
         "",
         "Context (JSON):",
         json.dumps(context, ensure_ascii=False, separators=(",", ":")),

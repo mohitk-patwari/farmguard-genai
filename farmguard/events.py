@@ -75,6 +75,7 @@ class RetreatStatus(str, Enum):
     LEAVING = "leaving"
     STILL_PRESENT = "still_present"
     UNCERTAIN = "uncertain"
+    TRUNCATED = "truncated"   # the clip or stream ended inside the window: no verdict, nothing to memory
 
 
 @dataclass
@@ -98,6 +99,7 @@ class PolicyDecision:
     source: str                     # llm | fixed | random | rule_chain | bandit | fallback
     warnings: list[str] = field(default_factory=list)
     latency_s: float = 0.0
+    shown_position: int | None = None  # LLM answers: index of the proposal in the shown enum (0 = first)
 
 
 @dataclass

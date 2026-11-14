@@ -77,13 +77,17 @@ agent:
   vlm:
     override_species: true      # a confident VLM species replaces the detector's for sounds, policy, alert, memory.
                                 # T1's boar clip: detector said stray_cattle / elephant on every event. false = detector only
-    override_min_confidence: "high"   # high | medium | low. Also: VLM "none" at high = possible false alarm (quiet note)
+    override_min_confidence: "high"   # high | medium. events.jsonl logs the effective species at none/high/medium for E2. Also: VLM "none" at high = possible false alarm (quiet note)
   retreat:
     observe_seconds: 12         # how long after a deterrent we watch
     gone_frames: 15             # consecutive frames with no animal in zone = gone (tracker evidence)
     use_vlm: true
+    min_frames: 10              # fewer frames before the clip/stream ended = "truncated": no verdict, nothing to memory.
+                                # Smoke test 2 recorded a success from ONE end-of-clip frame
   policy:
-    type: "llm"                 # llm | fixed | random | rule_chain | bandit | bandit_sw
+    type: "llm"                 # llm | llm_bandit | fixed | random | rule_chain | bandit | bandit_sw
+    shuffle_options: true       # shuffle legal sounds in the enum and the prompt per call, seeded by (seed, event, attempt).
+                                # E4 773ad66: 3b picked the first-listed sound in 75% of calls. false = that ordered run
     constrain_enum: true        # enum = legal actions only (untried, off cooldown). false = old enum: reproduces T4's
                                 # probe (21.7% of 3b answers picked a sound that already failed)
     immediate_escalation_species: ["elephant"]   # may go to the farmer before attempt 2 (danger to people)
@@ -91,6 +95,9 @@ agent:
     max_attempts: 3             # after this many failed deterrents, escalate to the farmer
     sound_cooldown_s: 20
     decision_log: "data/policy_decisions.jsonl"   # full prompt + response per LLM decision (paper examples, invalid-action rate)
+  notifier:
+    provider: null              # farmer alerts only: null = agent.provider; e.g. "gemini" (needs GEMINI_API_KEY).
+                                # Fails or no key -> the agent's own model -> the template
   include_location_in_prompt: false   # keep false: location hints made Claude answer from geography (~10% acc)
   adaptive_first_sound: true    # after each event the agent picks the next first alarm (cached; no LLM call in the alarm path)
 

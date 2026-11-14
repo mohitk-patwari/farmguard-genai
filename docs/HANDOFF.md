@@ -272,3 +272,19 @@ From the E4 audit (Terminal 4). None of these is changed in my code; the simulat
   same number of frames (it sent 4 before). 4 images overflowed num_ctx 4096 on Ollama (smoke test 2), so E2's burst
   condition is smaller again. `farmguard run` now honours `agent.policy.constrain_enum` (it was always true there).
   Retreat windows cut short by the end of a clip still get a verdict from the last frame: count those apart in E3/E5.
+- **From 2026-11-14 (T3), E4 decision code changed:** new cache keys, so no earlier LLM run is reused. Keep 773ad66's
+  constrained-enum LLM runs as the **"ordered options" ablation** (3b took the first listed sound in 75% of 4276 calls).
+  - `agent.policy.shuffle_options: true` (default): the legal sounds are shuffled in the enum and in the prompt's
+    per-sound history on every call, seeded by (`agent.seed`, event id, attempt). The simulator now gives each event an
+    id `r<run>e<i>`, so the order is reproducible. `false` = 773ad66's order (its own cache key).
+  - Decision records log `shown_order` and `chosen_position` (0 = first shown). `summarize()` has
+    `first_position_rate` (in-enum LLM answers that took the first option; `None` for non-LLM policies), and so does
+    `decision_log_summary()`. With one legal sound the first position is forced, so compare against 1/len(enum).
+  - New policy `llm_bandit`: the llm prompt plus `posterior_mean` = Beta(1+succ, 1+fail) mean per legal sound, same
+    enum, shuffle, validator and bandit fallback. Run it by name like `llm`; it caches under its own name.
+  - E3/E5 on clips: a retreat window with fewer than `agent.retreat.min_frames` (10) frames because the clip ended has
+    status `truncated` (events.jsonl `attempts[].status`, `agent.truncated_windows` in `farmguard run` output). It
+    writes nothing to memory. **Exclude truncated windows from E3/E5 or report them apart.**
+  - E2: events.jsonl has `effective_by_threshold` = the species used at override off (`none`), `high` and `medium`,
+    so the threshold can be studied without rerunning. `species_uncertain` marks detector/VLM disagreement involving
+    elephant (no immediate escalation on the detector alone; the alert names both).

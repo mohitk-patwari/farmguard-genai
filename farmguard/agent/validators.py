@@ -70,27 +70,34 @@ def validate(action: str, ctx: ValidationContext) -> tuple[str, list[str]]:
 
 @dataclass
 class AlertFacts:
-    """What a farmer alert must say, as phrases in the alert's language, from structured event fields."""
-    animal: str
+    """What a farmer alert must say, from structured event fields. Each fact is a list of stems in the
+    alert's language: any one of them counts, so a harmless paraphrase passes (smoke test 2: 5 of 6 Hindi
+    alerts were rejected only for rewording a sound name). Stems are substrings in Devanagari."""
+    animal: list[str]
     count: int
     attempts: int
-    sounds: list[str]
-    status: str
+    sounds: list[list[str]]  # one stem list per sound played
+    status: list[str]        # stems of the outcome's family (left / still there / unclear)
     time: str
-    forbidden: list[str]  # other animals and sounds. Multi-word = substring, one word = whole word
+    forbidden: list[str]     # stems of other animals, unplayed sounds and other outcomes
     number_words: dict[str, int]
     max_chars: int
-    latin_allowed: bool = False
+    latin_allowed: bool = False  # English: forbidden single words match whole words only
 
 
 DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 ALERT_WORD = r"[a-z]+|[\u0900-\u0963\u0970-\u097f]+"  # no danda or digits
 
 
+def norm(text: str) -> str:
+    """Lower case, ASCII digits, no nukta (आवाज़ = आवाज), so spelling variants match."""
+    return text.translate(DEVANAGARI_DIGITS).lower().replace("\u093c", "")
+
+
 def alert_problems(text: str, facts: AlertFacts) -> list[str]:
     """Why this LLM alert can't be sent; [] if its facts hold. Catches wrong or missing facts and
     repetition. It can't judge sense or grammar: a nonsense clause beside the right facts passes."""
-    t = text.translate(DEVANAGARI_DIGITS).lower()
+    t = norm(text)
     problems: list[str] = []
     if len(text) > facts.max_chars:
         problems.append("too long")
@@ -99,17 +106,21 @@ def alert_problems(text: str, facts: AlertFacts) -> list[str]:
     sentences = [s.strip() for s in re.split(r"[.!?\u0964\n]+", t) if s.strip()]
     if len(sentences) != len(set(sentences)):
         problems.append("repeated sentence")
-    rest = t.replace(facts.time, " ")
-    # longest first, so a phrase inside a longer one doesn't break it
-    for phrase in sorted([facts.animal, facts.status, *facts.sounds], key=len, reverse=True):
-        if phrase.lower() in rest:
-            rest = rest.replace(phrase.lower(), " ")
-        else:
-            problems.append(f"missing: {phrase}")
-    words = set(re.findall(ALERT_WORD, rest))
-    problems += [f"names: {name}" for name in facts.forbidden
-                 if (name.lower() in rest if " " in name else name.lower() in words)]
-    numbers = {int(n) for n in re.findall(r"\d+", rest)} | {v for w, v in facts.number_words.items() if w in words}
+    rest = t.replace(norm(facts.time), " ")
+    clean = rest  # for the forbidden check: every matched stem removed (नीलगाय must not read as गाय)
+    for label, stems in [("animal", facts.animal), *(("sound", s) for s in facts.sounds), ("outcome", facts.status)]:
+        hit = next((s for s in sorted({norm(x) for x in stems}, key=len, reverse=True) if s in rest), None)
+        if hit is None:
+            problems.append(f"missing {label}: {stems[0]}")
+            continue
+        rest = rest.replace(hit, " ", 1)  # one mention per fact: जंगली सूअर can't also be the boar sound
+        clean = clean.replace(hit, " ")
+    words = set(re.findall(ALERT_WORD, clean))
+    for name in facts.forbidden:
+        n = norm(name)
+        if (n in words) if (facts.latin_allowed and " " not in n) else (n in clean):
+            problems.append(f"names: {name}")
+    numbers = {int(n) for n in re.findall(r"\d+", clean)} | {v for w, v in facts.number_words.items() if w in words}
     problems += [f"wrong number: {n}" for n in sorted(numbers - {facts.count, facts.attempts})]
     if facts.count > 1 and facts.count not in numbers:
         problems.append(f"missing count: {facts.count}")

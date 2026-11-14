@@ -104,7 +104,7 @@ def fusion_errors(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
 class RetreatChecker:
     def __init__(self, buffer: FrameBuffer, client: LLMClient | None, observe_seconds: float = 12,
                  gone_frames: int = 15, use_vlm: bool = True, n_vlm_frames: int = MAX_IMAGES,
-                 max_side: int = MAX_SIDE):
+                 max_side: int = MAX_SIDE, min_frames: int = 10):
         self.buffer = buffer
         self.client = client
         self.observe_seconds = observe_seconds
@@ -112,11 +112,17 @@ class RetreatChecker:
         self.use_vlm = use_vlm and client is not None
         self.n_vlm_frames = n_vlm_frames
         self.max_side = max_side
+        self.min_frames = min_frames  # agent.retreat.min_frames
 
     def check(self, species_label: str, t_deterrent: float) -> RetreatResult:
         t_end = t_deterrent + self.observe_seconds
         self.buffer.wait_until(t_end, timeout_s=self.observe_seconds * 10 + 30)
         pkts = self.buffer.window(t_deterrent, t_end)
+        if len(pkts) < self.min_frames and self.buffer.finished:
+            # Smoke test 2: a sound played at the end of a 10 s clip got "leaving" from ONE frame, and that
+            # went into memory as a success. A window the source cut short has no verdict.
+            log.info("Retreat window truncated: %d frame(s) before the source ended", len(pkts))
+            return RetreatResult(RetreatStatus.TRUNCATED, None, RetreatStatus.TRUNCATED, None, None, len(pkts))
         tr_status, ttl = tracker_evidence(pkts, t_deterrent, self.gone_frames)
         vlm_status, vlm_conf, obs, vlm_error = None, None, "", None
         if self.use_vlm and pkts:
