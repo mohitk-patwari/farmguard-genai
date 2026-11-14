@@ -104,6 +104,51 @@ Findings:
   boar alert ("...सायरन गिरे" = "the sirens fell"; "फ़रमान करें" = "issue a decree"). 3b's Hindi is weak.
 - Constrained enum: 0 invalid, 0 escalations; elephant's enum included `escalate_farmer` at attempt 1 as designed.
 
+## Smoke test 3 (Terminal 3)
+2026-11-14, branch `agent` at 197ca03 (shuffle, llm_bandit, truncated windows, elephant safety, stem grounding).
+Same setup as smoke test 2 Run A: same clip, whole frame as field, `qwen2.5vl:3b`, num_ctx 4096, seed 42,
+`constrain_enum: true`, `shuffle_options: true`, `override_species: true` (threshold high), `--mute`, Hindi,
+CPU-only torch. **A smoke test, not E2/E3 results: one clip, 3 events, one run.** No bug found; nothing rerun.
+
+| | Smoke test 2 (Run A, fixed) | Smoke test 3 |
+|---|---|---|
+| Events | 3 | 3 |
+| VLM event check ok / calls; max prompt tokens | 3/3; 3401 | 3/3; 3401 |
+| VLM retreat calls ok / calls; max prompt tokens | 6/6; 3278 | 3/3; 3278 (no call on truncated windows) |
+| Detector -> VLM (conf) -> effective | cattle -> boar (med) -> cattle; elephant -> boar (med) -> elephant; boar -> boar (med) -> boar | same |
+| Species at none / high / medium | not logged | cattle / cattle / **boar**; elephant / elephant / **boar**; boar / boar / boar |
+| Elephant disagreement | not handled | flagged; no `escalate_farmer` offered in-event; alert names both |
+| Retreat after 1st alarm (tracker / VLM / fused) | still / still / still, x3 | same |
+| Retreat after 2nd sound | still / leaving / **leaving from 1 frame**, x3 (written to memory) | **truncated**, x3 (not in memory) |
+| Final status | leaving x3 | truncated x3 |
+| In-event actions (shown order -> chosen position) | dog_bark, tiger_roar, gunshot: all position 0, fixed order | dog_bark [drum, dog, siren] -> 1; drum_beat [siren, drum, tiger] -> 1; siren [siren, gunshot, tiger] -> 0 |
+| first_position_rate (all 6 LLM answers, incl. next-visit first sound) | 3/6 (no shuffle) | 2/6 |
+| Invalid actions / escalations | 0/6 / none | 0/6 / none |
+| Alerts sent from LLM / template | 0 / 3 (all rejected for rewording) | 2 / 1 (1 rejected for a wrong outcome) |
+| Detect (CPU) median / max ms | 118.6 / 170.3 | 100.8 / 132.8 |
+| Alarm read -> start; first-zone -> start, median / max ms | 120.1 / 123.0; 631.6 / 634.5 | 100.9 / 104.4; 440.7 / 444.2 |
+| VLM event; VLM retreat, median / max s | 7.6 / 12.6; 6.8 / 13.2 | 13.2 / 25.5; 7.9 / 13.8 |
+| Policy; alert call, median / max s | 3.1 / 3.3; 6.0 / 6.1 | 3.2 / 3.4; 4.9 / 5.9 |
+| Peak VRAM (idle) / lowest free RAM / wall | 4651 MB (629) / 6.03 GB / 98 s | 4697 MB (675) / 7.31 GB / 96 s |
+
+Alerts (all three sent at 13:39):
+- Cattle event, **LLM, accepted**: "आवारा पशु 13:39 की आदमी के चिल्लाने की आवाज़ और कुत्ते की आवाज़ सुनी. स्थिति साफ़ नहीं है.
+  फ़र्मर, फ़िल्ड में जाकर देखें." = "Stray cattle at 13:39 heard a man shouting and a dog. The situation is unclear.
+  Farmer, go to the field and check." Facts right, grammar broken.
+- Elephant event, **LLM, accepted**, plus the fixed safety sentence: "हाथी आयी 13:39 में मधुमक्खियों की आवाज़ और ढोल सुना।
+  स्थिति साफ़ नहीं है। जानवर पक्का नहीं है (डिटेक्टर: हाथी, कैमरा जाँच: जंगली सूअर)।" = "Elephant came at 13:39, heard bees and
+  the drum. The situation is unclear. Species not certain (detector: elephant, camera check: wild boar)."
+- Boar event, **template** (`template_ungrounded`): "13:39 बजे खेत में जंगली सूअर आया। बजाई गई आवाज़ें: सूअर की आवाज़, सायरन। जानवर
+  स्थिति साफ़ नहीं है। कृपया खेत देखें।" = "At 13:39 a wild boar came into the field. Sounds played: boar sound, siren. Animal:
+  status unclear. Please check the field." The LLM wrote "जंगली सूअर आया था। उसने सूअर की आवाज़ और सायरन सुना। यह नहीं गया।
+  फ़रमान देखें।" ("...It did not go. Look at the decree."): rejected, missing outcome. Correct: it claimed the boar stayed,
+  but the window was truncated, so the outcome is unknown.
+
+Findings: the VLM again said wild boar at medium on all 3 events, so at `medium` the effective species would have been
+right 3/3 (2 overrides) on this clip; still no accuracy measurement, so the default stays `high` until E2. All three
+second-sound windows ended with the clip and were truncated instead of being recorded as successes. Shuffle moved
+the in-event choices off position 0 (1 of 3 first vs 3 of 3), but 3 answers measure nothing about bias.
+
 ## For Terminal 1 (integrator)
 - Add to requirements.txt: `lap>=0.5.12`. Without it ultralytics runs `pip install` from inside the
   frame loop; the detector now refuses to start instead. `soundfile` is needed by
